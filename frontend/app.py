@@ -23,7 +23,7 @@ def get_settings() -> FrontendSettings:
 
 def get_api_client() -> httpx.Client:
     settings = get_settings()
-    return httpx.Client(base_url=settings.api_base_url, timeout=20.0)
+    return httpx.Client(base_url=settings.api_base_url, timeout=30.0)
 
 
 def initialize_session_state() -> None:
@@ -37,6 +37,8 @@ def initialize_session_state() -> None:
         st.session_state.active_view = "chat"
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
+    if "chat_session_id" not in st.session_state:
+        st.session_state.chat_session_id = "streamlit-default-session"
 
 
 def list_servers() -> list[dict]:
@@ -89,11 +91,15 @@ def test_connection(server_id: str) -> dict:
         return response.json()
 
 
-def execute_command(server_id: str, command: str) -> dict:
+def send_chat_message(session_id: str, server_id: str, message: str) -> dict:
     with get_api_client() as client:
         response = client.post(
-            "/commands/execute",
-            json={"server_id": server_id, "command": command},
+            "/chat",
+            json={
+                "session_id": session_id,
+                "server_id": server_id,
+                "message": message,
+            },
         )
         response.raise_for_status()
         return response.json()
@@ -239,7 +245,7 @@ def render_chat_panel() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    prompt = st.chat_input("Ask something like: uptime or df -h")
+    prompt = st.chat_input("Ask something like: check uptime or show disk usage")
     if not prompt:
         return
 
@@ -248,15 +254,25 @@ def render_chat_panel() -> None:
         st.markdown(prompt)
 
     try:
-        result = execute_command(server_id=connected_server_id, command=prompt.strip())
-        assistant_reply = (
-            f"Command: `{result['command']}`\n\n"
-            f"Exit status: `{result['exit_status']}`\n\n"
-            f"Stdout:\n```bash\n{result['stdout'] or '<empty>'}\n```\n\n"
-            f"Stderr:\n```bash\n{result['stderr'] or '<empty>'}\n```"
+        result = send_chat_message(
+            session_id=st.session_state.chat_session_id,
+            server_id=connected_server_id,
+            message=prompt.strip(),
         )
+        assistant_reply = result["reply"]
+        tool_events = result.get("tool_events", [])
+        if tool_events:
+            trace_lines = [
+                f"- `{event['command']}` -> exit `{event['exit_status']}`"
+                for event in tool_events
+            ]
+            assistant_reply = (
+                f"{assistant_reply}\n\n"
+                "Tool activity:\n"
+                + "\n".join(trace_lines)
+            )
     except httpx.HTTPStatusError as exc:
-        assistant_reply = f"Command failed: {exc.response.text}"
+        assistant_reply = f"Agent request failed: {exc.response.text}"
     except httpx.HTTPError as exc:
         assistant_reply = f"Backend is unreachable: {exc}"
 
@@ -273,7 +289,7 @@ def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:
 
     with st.sidebar:
         st.header("Server Manager")
-        st.caption("Register servers, browse them, and connect before chatting.")
+        st.caption("Register servers, browse them, connect, and then chat.")
 
         if st.button("Chat", use_container_width=True):
             st.session_state.active_view = "chat"
@@ -322,7 +338,7 @@ def main() -> None:
     st.title("Chat-Based Linux Server Manager")
     st.write(
         "Register Linux hosts using a public IPv4 address, username selection,"
-        " and uploaded `.pem` key, then verify SSH access and unlock chat."
+        " and uploaded `.pem` key, then connect and use the agent-powered chat."
     )
 
     try:
@@ -340,13 +356,7 @@ def main() -> None:
         )
         st.warning(f"API connection failed: {exc}")
 
-    server_registered, servers = render_sidebar(servers)
-    if server_registered and not servers:
-        try:
-            servers = list_servers()
-        except httpx.HTTPError as exc:
-            st.warning(f"Server saved, but refresh failed: {exc}")
-
+    _, servers = render_sidebar(servers)
     render_main_content(servers)
 
 
