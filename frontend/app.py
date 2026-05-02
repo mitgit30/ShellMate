@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 
 import httpx
 import streamlit as st
@@ -103,6 +104,32 @@ def send_chat_message(session_id: str, server_id: str, message: str) -> dict:
         )
         response.raise_for_status()
         return response.json()
+
+
+def stream_chat_message(session_id: str, server_id: str, message: str):
+    st.session_state.pending_tool_events = []
+    with get_api_client() as client:
+        with client.stream(
+            "POST",
+            "/chat/stream",
+            json={
+                "session_id": session_id,
+                "server_id": server_id,
+                "message": message,
+            },
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                event = json.loads(line)
+                event_type = event.get("type")
+                if event_type == "token":
+                    yield event.get("content", "")
+                elif event_type == "tool_event":
+                    st.session_state.pending_tool_events.append(event)
+                elif event_type == "error":
+                    raise RuntimeError(event.get("detail", "Streaming chat failed."))
 
 
 def load_styles() -> None:
@@ -254,33 +281,37 @@ def render_chat_panel() -> None:
         st.markdown(prompt)
 
     try:
-        result = send_chat_message(
-            session_id=st.session_state.chat_session_id,
-            server_id=connected_server_id,
-            message=prompt.strip(),
-        )
-        assistant_reply = result["reply"]
-        tool_events = result.get("tool_events", [])
-        if tool_events:
-            trace_lines = [
-                f"- `{event['command']}` -> exit `{event['exit_status']}`"
-                for event in tool_events
-            ]
-            assistant_reply = (
-                f"{assistant_reply}\n\n"
-                "Tool activity:\n"
-                + "\n".join(trace_lines)
+        with st.chat_message("assistant"):
+            assistant_reply = st.write_stream(
+                stream_chat_message(
+                    session_id=st.session_state.chat_session_id,
+                    server_id=connected_server_id,
+                    message=prompt.strip(),
+                )
             )
+            tool_events = st.session_state.get("pending_tool_events", [])
+            if tool_events:
+                trace_lines = [
+                    f"- `{event['command']}` -> exit `{event['exit_status']}`"
+                    for event in tool_events
+                ]
+                st.markdown("Tool activity:\n" + "\n".join(trace_lines))
     except httpx.HTTPStatusError as exc:
         assistant_reply = f"Agent request failed: {exc.response.text}"
+        with st.chat_message("assistant"):
+            st.markdown(assistant_reply)
     except httpx.HTTPError as exc:
         assistant_reply = f"Backend is unreachable: {exc}"
+        with st.chat_message("assistant"):
+            st.markdown(assistant_reply)
+    except RuntimeError as exc:
+        assistant_reply = str(exc)
+        with st.chat_message("assistant"):
+            st.markdown(assistant_reply)
 
     st.session_state.chat_messages.append(
         {"role": "assistant", "content": assistant_reply}
     )
-    with st.chat_message("assistant"):
-        st.markdown(assistant_reply)
 
 
 def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:

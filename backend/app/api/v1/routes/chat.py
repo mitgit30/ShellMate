@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from backend.app.api.dependencies import server_ops_agent
 from backend.app.core.exceptions import SSHConnectionError, ServerNotFoundError
@@ -37,3 +40,25 @@ def chat(payload: ChatRequest) -> ChatResponse:
             for event in result.tool_events
         ],
     )
+
+
+@router.post("/stream", status_code=status.HTTP_200_OK)
+def chat_stream(payload: ChatRequest) -> StreamingResponse:
+    def event_stream():
+        try:
+            for event in server_ops_agent.stream_turn(
+                session_id=payload.session_id,
+                server_id=payload.server_id,
+                user_message=payload.message,
+            ):
+                yield json.dumps(event) + "\n"
+        except ServerNotFoundError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 404}) + "\n"
+        except SSHConnectionError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 502}) + "\n"
+        except ValueError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 400}) + "\n"
+        except RuntimeError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 500}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")

@@ -20,3 +20,10 @@ class OllamaModelClient:
             tools=tools,
         )
         return response.model_dump()
+
+    def chat_stream(self, messages: list[dict]) -> object:
+        return self._client.chat(
+            model=self._model,
+            messages=messages,
+            stream=True,
+        )
