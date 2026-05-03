@@ -12,3 +12,8 @@ class ToolEvent(BaseModel): #
 class AgentTurnResult(BaseModel):
     reply: str
     tool_events: list[ToolEvent] = Field(default_factory=list)
+
+
+class SkillRouteDecision(BaseModel):
+    skill_id: str
+    reason: str

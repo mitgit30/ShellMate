@@ -1,14 +1,18 @@
 from functools import lru_cache
 import json
+import time
 
 import httpx
 import streamlit as st
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from websockets.sync.client import connect
 
 
 class FrontendSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000/api/v1")
+    websocket_url: str = Field(default="ws://127.0.0.1:8765")
+    stream_token_delay_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -40,6 +44,8 @@ def initialize_session_state() -> None:
         st.session_state.chat_messages = []
     if "chat_session_id" not in st.session_state:
         st.session_state.chat_session_id = "streamlit-default-session"
+    if "last_agent_events" not in st.session_state:
+        st.session_state.last_agent_events = {"route": [], "tools": []}
 
 
 def list_servers() -> list[dict]:
@@ -92,44 +98,83 @@ def test_connection(server_id: str) -> dict:
         return response.json()
 
 
-def send_chat_message(session_id: str, server_id: str, message: str) -> dict:
-    with get_api_client() as client:
-        response = client.post(
-            "/chat",
-            json={
-                "session_id": session_id,
-                "server_id": server_id,
-                "message": message,
-            },
-        )
-        response.raise_for_status()
-        return response.json()
-
-
 def stream_chat_message(session_id: str, server_id: str, message: str):
     st.session_state.pending_tool_events = []
-    with get_api_client() as client:
-        with client.stream(
-            "POST",
-            "/chat/stream",
-            json={
-                "session_id": session_id,
-                "server_id": server_id,
-                "message": message,
-            },
-        ) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                event = json.loads(line)
-                event_type = event.get("type")
-                if event_type == "token":
-                    yield event.get("content", "")
-                elif event_type == "tool_event":
-                    st.session_state.pending_tool_events.append(event)
-                elif event_type == "error":
-                    raise RuntimeError(event.get("detail", "Streaming chat failed."))
+    st.session_state.pending_route_events = []
+    websocket_url = get_settings().websocket_url
+    token_delay = get_settings().stream_token_delay_seconds
+
+    with connect(websocket_url) as websocket:
+        websocket.send(
+            json.dumps(
+                {
+                    "type": "chat",
+                    "session_id": session_id,
+                    "server_id": server_id,
+                    "message": message,
+                }
+            )
+        )
+
+        while True:
+            raw_event = websocket.recv()
+            event = json.loads(raw_event)
+            event_type = event.get("type")
+            if event_type == "token":
+                if token_delay > 0:
+                    time.sleep(token_delay)
+                yield event.get("content", "")
+            elif event_type == "tool_event":
+                st.session_state.pending_tool_events.append(event)
+            elif event_type in {
+                "intent_detected",
+                "skill_selected",
+                "step_started",
+                "step_completed",
+                "tool_called",
+            }:
+                st.session_state.pending_route_events.append(event)
+            elif event_type == "error":
+                raise RuntimeError(event.get("detail", "WebSocket chat failed."))
+            elif event_type == "done":
+                break
+
+
+def render_last_agent_trace() -> None:
+    route_events = st.session_state.last_agent_events.get("route", [])
+    tool_events = st.session_state.last_agent_events.get("tools", [])
+    if not route_events and not tool_events:
+        return
+
+    with st.expander("Latest Agent Trace", expanded=False):
+        if route_events:
+              route_lines = []
+              for event in route_events:
+                 
+                  ev_type = event.get("type")
+                  if ev_type == "intent_detected":
+                      route_lines.append(f"- Intent: {event.get('detail', '<missing detail>')}")
+                  elif ev_type == "skill_selected":
+                      route_lines.append(
+                          f"- Skill: {event.get('skill_id', '<unknown>')} "
+                          f"({event.get('reason', '<no reason>')})"
+                      )
+                  elif event["type"] == "step_started":
+                    route_lines.append(f"- Step started: {event['detail']}")
+                  elif event["type"] == "step_completed":
+                    route_lines.append(f"- Step completed: {event['detail']}")
+                  
+                  elif ev_type == "tool_called":
+                    cmd = event.get("command", "<no command>")
+                    it = event.get("iteration", "?")
+                    route_lines.append(f"- Tool called: `{cmd}` (iteration {it})")
+                    
+
+            
+        if route_lines: #  
+            st.markdown("\n".join(route_lines))
+     
+  
 
 
 def load_styles() -> None:
@@ -272,6 +317,8 @@ def render_chat_panel() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
+    render_last_agent_trace()
+
     prompt = st.chat_input("Ask something like: check uptime or show disk usage")
     if not prompt:
         return
@@ -289,13 +336,10 @@ def render_chat_panel() -> None:
                     message=prompt.strip(),
                 )
             )
-            tool_events = st.session_state.get("pending_tool_events", [])
-            if tool_events:
-                trace_lines = [
-                    f"- `{event['command']}` -> exit `{event['exit_status']}`"
-                    for event in tool_events
-                ]
-                st.markdown("Tool activity:\n" + "\n".join(trace_lines))
+            st.session_state.last_agent_events = {
+                "route": list(st.session_state.get("pending_route_events", [])),
+                "tools": list(st.session_state.get("pending_tool_events", [])),
+            }
     except httpx.HTTPStatusError as exc:
         assistant_reply = f"Agent request failed: {exc.response.text}"
         with st.chat_message("assistant"):
@@ -369,7 +413,7 @@ def main() -> None:
     st.title("Chat-Based Linux Server Manager")
     st.write(
         "Register Linux hosts using a public IPv4 address, username selection,"
-        " and uploaded `.pem` key, then connect and use the agent-powered chat."
+        " and uploaded `.pem` key, then connect and use the WebSocket-powered agent chat."
     )
 
     try:

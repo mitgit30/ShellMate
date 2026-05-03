@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
     ssh_command_timeout_seconds: int = Field(default=20, ge=1, le=300)
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))
+    server_database_path: Path = Field(default=Path("backend/data/servers.db"))
 
     model_config = SettingsConfigDict(
         env_file=".env",
