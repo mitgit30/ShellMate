@@ -1,6 +1,6 @@
 ﻿# Chat‑Based Linux Server Manager
 
-Prototype project for managing Linux servers through a chat‑style workflow. It consists of a FastAPI backend for server registration and SSH connection support, a WebSocket gateway for live agent chat, and a Streamlit frontend that provides an interactive UI.
+Prototype project for managing Linux servers through a chat‑style workflow. It consists of a FastAPI backend for server registration and SSH support, a WebSocket gateway for live agent chat, and a Streamlit frontend that provides an interactive UI.
 
 ## Project Structure
 
@@ -17,7 +17,7 @@ backend/
           servers.py
           sessions.py
     core/
-      config.py          # Pydantic settings, SSH timeout, key storage dir
+      config.py          # Settings, SSH timeout, key storage dir
       exceptions.py
     repositories/
       server_repository.py   # In‑memory server store
@@ -39,21 +39,21 @@ frontend/
 
 src/
   gateway/
-    websocket_server.py   # WebSocket chat gateway using the websockets library
+    websocket_server.py   # WebSocket gateway using the websockets library
   runtime/
-    agent.py             # Runtime flow: understand -> route -> execute skill -> persist
-    models.py            # Pydantic models for tool events and route decisions
-    ollama_client.py     # Ollama client wrapper for routing and skill execution
+    agent.py             # Orchestrates intent → routing → skill execution
+    models.py            # ToolEvent, SkillRouteDecision, etc.
+    ollama_client.py     # Ollama LLM wrapper for routing and skill execution
     config.py
   skills/
     base.py
     registry.py
     router.py
-    ssh_skill.py         # First skill: all SSH-oriented requests
+    ssh_skill.py         # First skill: handles all SSH‑related requests
   storage/
-    session_store.py     # In‑memory chat session store
+    session_store.py    # In‑memory chat session store
   tools/
-    ssh_tool.py          # Structured SSH tool used by the SSH skill
+    ssh_tool.py         # Structured SSH tool used by the SSH skill
     __init__.py
 
 tests/
@@ -62,64 +62,53 @@ tests/
 
 ## Backend (FastAPI)
 
-- **Configuration** (`backend/app/core/config.py`): Centralised settings loaded from `.env`, including API title/version, frontend base URL, SSH command timeout, and key storage directory.
-- **Service Layer** (`services/`):
-  - `ServerService` manages CRUD for server records.
-  - `SSHService` establishes SSH connections, runs commands, and returns `CommandExecutionResponse`.
-  - `KeyStorageService` handles PEM key uploads.
-- **API Routers** (`api/v1/routes/`):
-  - `servers` – register, list, and delete servers.
-  - `keys` – upload PEM files.
-  - `ssh` – test connectivity and execute commands.
-  - `chat` – start a session, send messages, and stream responses (including tool events).
-  - `health` – simple health check.
+- **Configuration** (`backend/app/core/config.py`): central settings loaded from `.env` (API title/version, SSH command timeout, key storage directory, etc.).
+- **Service layer** (`services/`):
+  - `ServerService` – CRUD for server records.
+  - `SSHService` – opens SSH connections, runs commands, returns `CommandExecutionResponse`.
+  - `KeyStorageService` – handles PEM key uploads.
+- **API routers** (`api/v1/routes/`): `servers`, `keys`, `ssh` (test/execute), `chat` (session & streaming), `health`.
 
-All routes are mounted under `/api/v1` and the app enables CORS for any origin (development convenience).
+All routes are mounted under `/api/v1` and CORS is open for development.
 
 ## Frontend (Streamlit)
 
-- **Configuration** (`frontend/app.py`): Reads `API_BASE_URL` and `WEBSOCKET_URL` from `.env`.
-- **Session State**: Tracks selected/connected server, active view (`chat` or `registered_servers`), and chat history via `st.session_state`.
-- **Sidebar**: Server registry form (host, username, PEM upload), connection testing panel, and navigation buttons.
-- **Main Area**:
-  - *Server table* – displays registered servers.
-  - *Chat panel* – connects to the WebSocket gateway, streams AI responses, and shows skill/tool activity.
+- **Configuration** (`frontend/app.py`): reads `API_BASE_URL` and `WEBSOCKET_URL` from `.env`.
+- **Session state** tracks selected/connected server, active view (chat or server list), and chat history.
+- **Sidebar** – server registration form, connection testing, navigation buttons.
+- **Main area** – server table or chat panel. The chat panel talks to the WebSocket gateway, streams token events, and displays tool activity.
 
-The UI is lightweight, styled with minimal custom CSS, and focuses on the workflow: register → connect → chat.
+## Runtime, Skills & WebSocket Gateway
 
-## Runtime, Skills \& WebSocket Gateway
-
-- **Skill Router** (`src/skills/router.py`): Prompts the LLM with the available skills and asks it to select the best one.
-- **Skill Registry** (`src/skills/registry.py`): Central list of registered skills. Phase one contains only one skill: `ssh`.
-- **SSH Skill** (`src/skills/ssh_skill.py`): Handles all SSH-oriented work. It can inspect server state, logs, services, uptime, files, and other tasks by calling the structured SSH tool.
-- **SSH Tool** (`src/tools/ssh_tool.py`): Validates and executes SSH commands through `SSHService`.
-- **Runtime Agent** (`src/runtime/agent.py`): Runs the flow `understand intent -> route to skill -> execute skill step by step -> persist history`.
-- **WebSocket Gateway** (`src/gateway/websocket_server.py`): Streams events like `intent_detected`, `skill_selected`, `tool_event`, and response tokens to the frontend using the `websockets` library.
-- **Session Store** (`src/storage/session_store.py`): Simple in‑memory holder for chat sessions.
+- **Skill registry** holds the available skills (currently only the SSH skill).
+- **Skill router** asks the LLM (via Ollama) to pick the best skill based on the user message.
+- **SSH skill** (`src/skills/ssh_skill.py`) drives the conversation, calling the `run_ssh_command` tool when needed.
+- **WebSocket gateway** (`src/gateway/websocket_server.py`) receives a JSON chat request, invokes the agent’s `stream_turn`, and streams back events (`intent_detected`, `skill_selected`, `token`, `tool_event`, `error`, `done`).
+- **Session store** (`src/storage/session_store.py`) keeps an in‑memory history per session.
 
 ## Quick Start
 
-1. **Install dependencies**
+1. Install dependencies:
    ```bash
    uv sync
    ```
-2. **Run the backend**
+2. Run the FastAPI backend:
    ```bash
    uv run uvicorn backend.app.main:app --reload
    ```
-3. **Run the WebSocket gateway**
+3. Run the WebSocket gateway:
    ```bash
    uv run python -m src.gateway.websocket_server
    ```
-4. **Run the frontend**
+4. Run the Streamlit UI:
    ```bash
    uv run streamlit run frontend/app.py
    ```
-5. Open the Streamlit URL shown in the terminal, register a server (public IPv4, username, upload the corresponding `.pem` key), test the connection, and start chatting with the AI assistant over WebSockets. The assistant first routes the request to the `ssh` skill, then that skill can invoke the `run_ssh_command` tool to fetch live data from the connected host.
+5. Open the URL shown by Streamlit, register a server (public IPv4, username, upload its `.pem` key), test the connection, and start chatting with the AI assistant over WebSockets.
 
-## Notes \& Future Work
+## Notes & Future Work
 
-- The server registry is in‑memory; persistence could be added via a database.
-- Currently only PEM files are supported; other key formats could be integrated.
-- The first skill layer contains only the `ssh` skill. Additional skills can be added later without changing the overall route/execute/stream architecture.
-- Security hardening (rate limiting, auth, secret management) is required for production use.
+- The server registry is in‑memory; a persistent DB could be added.
+- Only PEM keys are supported – other formats can be integrated later.
+- At the moment the only skill is the SSH skill; additional skills can be registered in `SkillRegistry` without changing the rest of the architecture.
+- Security hardening (auth, rate limiting, secret management) is required for production use.
