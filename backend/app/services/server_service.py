@@ -1,10 +1,10 @@
 from backend.app.core.exceptions import ServerAlreadyExistsError, ServerNotFoundError
-from backend.app.repositories.server_repository import InMemoryServerRepository
+from backend.app.repositories.server_repository import ServerRepository
 from backend.app.schemas.server import ServerCreate, ServerRecord, ServerResponse
 
 
 class ServerService:
-    def __init__(self, server_repository: InMemoryServerRepository) -> None:
+    def __init__(self, server_repository: ServerRepository) -> None:
         self._server_repository = server_repository
 
     def list_servers(self) -> list[ServerResponse]:

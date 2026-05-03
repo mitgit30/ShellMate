@@ -1,0 +1,10 @@
+paramiko
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+httpx
+ollama
+streamlit
+python-multipart # For file uploads in FastAPI
+websockets
