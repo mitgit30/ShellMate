@@ -286,9 +286,9 @@ The project already maintains in-memory session state for chat continuity. This 
 
 This is enough for a functional prototype and makes multi-turn interactions possible.
 
-## What Makes the Current Architecture Good
+## Current Architecture
 
-There are several things already done well.
+There are several things that have been implemented
 
 ### Clear Separation of Concerns
 
@@ -303,7 +303,7 @@ That makes the codebase easier to grow than a monolithic chatbot implementation.
 
 ### Real Infrastructure Integration
 
-This is not only an LLM wrapper. The system is already integrated with actual server access and remote command execution.
+The system is  integrated with actual server access and remote command execution.
 
 ### Observable Agent Behavior
 
@@ -333,11 +333,11 @@ The current router selects one skill per turn. This works for the present featur
 
 Some operational safety rules exist at the prompt and workflow level, but a stronger code-enforced approval system is still a next-stage improvement.
 
-## What This Project Represents Today
+## This Project Represents 
 
-Today, this project is a functional conversational control plane for Linux servers.
+This project is a functional conversational control plane for Linux servers.
 
-It already demonstrates:
+It  demonstrates:
 
 - real SSH connectivity
 - remote command execution
@@ -346,8 +346,6 @@ It already demonstrates:
 - session-aware agent orchestration
 - skill-based tool execution
 - a usable Streamlit operator interface
-
-That is a meaningful milestone. It is no longer just an idea or a simple chatbot prototype; it is an integrated systems application with a working end-to-end loop.
 
 ## Near-Term Direction
 
@@ -364,7 +362,7 @@ Those are evolutionary steps from the system that already exists today.
 
 ## Summary
 
-This project has already achieved the hard foundational part of an AI Linux server manager:
+This project has  achieved  foundational part of an AI Linux server manager:
 
 - server onboarding
 - authenticated remote access
