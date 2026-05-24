@@ -14,6 +14,8 @@ from src.tools.ssh_tool import SSHCommandTool
 from src.tools.web_dev_tools import WebDevTool
 from src.skills.web_dev_skills import WebDevSkill
 
+from src.tools.docker_tools import DockerTool
+from src.skills.docker_skills import DockerSkill
 settings = get_settings()
 server_repository = SQLiteServerRepository(settings.server_database_path)
 server_service = ServerService(server_repository=server_repository)
@@ -25,7 +27,9 @@ ssh_command_tool = SSHCommandTool(ssh_service=ssh_service)
 web_dev_tool = WebDevTool(ssh_service=ssh_service)
 web_dev_skill= WebDevSkill(model_client=model_client, web_tool=web_dev_tool)
 ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool)
-skill_registry = SkillRegistry(skills=[ssh_skill, web_dev_skill])
+docker_tool = DockerTool(ssh_service=ssh_service)
+docker_skill = DockerSkill(model_client=model_client, docker_tool=docker_tool)
+skill_registry = SkillRegistry(skills=[ssh_skill, web_dev_skill,docker_skill])
 skill_router = SkillRouter(model_client=model_client, skill_registry=skill_registry)
 server_ops_agent = ServerOpsAgent(
     skill_router=skill_router,

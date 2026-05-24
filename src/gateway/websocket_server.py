@@ -48,7 +48,7 @@ async def handle_connection(websocket) -> None:
                     if event is None:
                         break
                     await websocket.send(json.dumps(event))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  
                 print("WebSocket request failed:")
                 print(traceback.format_exc())
                 if websocket.close_code is None:

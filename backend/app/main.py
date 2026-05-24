@@ -26,3 +26,5 @@ app.include_router(keys_router, prefix="/api/v1")
 app.include_router(servers_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
+
+
