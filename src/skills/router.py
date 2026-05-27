@@ -52,18 +52,7 @@ class SkillRouter:
     @staticmethod
     def _route_by_heuristic(user_message: str, history: list[dict]) -> SkillRouteDecision | None:
         lowered = user_message.lower()
-        deployment_keywords = (
-            "deploy",
-            "deployment",
-            "docker",
-            "compose",
-            "containerize",
-            "containerise",
-            "release",
-            "ship this app",
-            "approve deployment",
-        )
-        if any(keyword in lowered for keyword in deployment_keywords):
+        if SkillRouter._is_deployment_request(lowered):
             return SkillRouteDecision(
                 skill_id="deployment",
                 reason="Heuristic routing selected the structured deployment engine.",
@@ -85,3 +74,50 @@ class SkillRouter:
             )
 
         return None
+
+    @staticmethod
+    def _is_deployment_request(lowered: str) -> bool:
+        if "approve deployment" in lowered or "cancel deployment" in lowered:
+            return True
+
+        if any(
+            phrase in lowered
+            for phrase in (
+                "what can you do",
+                "how to install docker",
+                "install docker",
+                "is docker installed",
+                "check docker",
+                "docker version",
+                "what is docker",
+            )
+        ):
+            return False
+
+        strong_deployment_terms = (
+            "deploy ",
+            "deployment ",
+            "containerize",
+            "containerise",
+            "ship this app",
+            "roll out",
+            "release ",
+        )
+        if any(term in lowered for term in strong_deployment_terms):
+            return True
+
+        docker_rollout_terms = (
+            "docker compose",
+            "compose up",
+            "compose this",
+            "run this app in docker",
+            "build and run",
+            "deploy this app with docker",
+            "deploy with docker",
+            "dockerize this app",
+            "dockerise this app",
+        )
+        if any(term in lowered for term in docker_rollout_terms):
+            return True
+
+        return False
