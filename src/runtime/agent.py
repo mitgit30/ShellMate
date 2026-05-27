@@ -54,6 +54,7 @@ class ServerOpsAgent:
             server_id=server_id,
             user_message=user_message,
             history=history,
+            session_state=session.metadata,
         )
 
         reply_parts: list[str] = []

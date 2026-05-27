@@ -9,6 +9,7 @@ class SkillContext:
     server_id: str
     user_message: str
     history: list[dict]
+    session_state: dict
 
 
 class BaseSkill(ABC):
