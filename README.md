@@ -1,374 +1,362 @@
-# Chat-Based Linux Server Manager
+# ShellMate
 
-## What This Project Is
+## Overview
 
-This project is an AI-assisted Linux server manager that lets a user register a remote Linux machine, connect to it over SSH, and operate it through a chat-based interface.
+ShellMate is an AI-assisted Linux server manager built around two operating modes:
 
-The system already supports the full basic loop:
+- `Pillar 1: Day-to-Day Server Management`
+- `Pillar 2: Structured Deployment Engine`
 
-- register a server
-- upload its SSH private key
-- verify connectivity
-- open a chat session
-- send natural-language requests
-- route the request to a suitable runtime skill
-- execute remote actions over SSH
-- stream progress and results back to the UI
+The system is designed to let users work with Linux servers through natural language while keeping risky infrastructure changes controlled, observable, and reviewable.
 
-At this stage, the project is best understood as a working foundation for conversational server operations rather than a finished deployment platform.
+This is not a generic chatbot wrapped around shell access. It is an event-driven operations system with real SSH execution, live streaming feedback, structured validation, and approval-aware automation.
 
-## What Has Been Achieved So Far
+## Product Philosophy
 
-The current implementation already provides five important building blocks.
+ShellMate separates infrastructure work into two different classes of behavior.
 
-### 1. Server Registration and Access Management
+### Pillar 1: Day-to-Day Server Management
 
-The backend can store server connection details and manage uploaded SSH private keys. A user can register a Linux host with:
+This mode is conversational, lightweight, and flexible.
 
-- server ID
-- display name
-- public IPv4 address
-- SSH port
-- username
-- private key path
+It is used for requests such as:
 
-This gives the system a concrete target machine to operate on instead of acting like a generic chatbot.
+- check uptime
+- inspect disk or RAM usage
+- read logs
+- inspect services
+- verify ports
+- troubleshoot runtime issues
+- perform simple operational tasks
 
-### 2. Real SSH-Based Execution
+In this mode, the assistant can reason more freely, choose commands dynamically, and respond naturally. This is the right model for diagnostics and routine operations where flexibility is valuable.
 
-The agent does not simulate server work. It connects to the registered machine through SSH and executes commands remotely. This is the core capability of the project.
+### Pillar 2: Structured Deployment Engine
 
-That means the system can already act on real infrastructure for tasks such as:
+This mode is strict, stage-driven, and safety-focused.
 
-- system inspection
-- log checks
-- service status checks
-- filesystem exploration
-- command execution
+It is used for deployment-related requests such as:
 
-### 3. FastAPI Management Backend
+- deploy an app with Docker
+- deploy a multi-service app with Docker Compose
+- update an existing Docker-based deployment
+- generate deployment files
+- validate environment readiness before rollout
 
-The backend exposes structured APIs for managing the server layer. These APIs handle:
+In this mode, the system does not improvise. It switches out of conversational behavior and follows a deterministic pipeline with explicit validations, approvals, execution steps, and verification.
 
-- server registration
-- server lookup
-- SSH key upload
-- SSH connection testing
-- direct command execution
-- chat request handling
+This separation is the core design decision of the project.
 
-This gives the project a clean application boundary between infrastructure management and the frontend experience.
+## System Model
 
-### 4. WebSocket-Based Streaming Chat
-
-The conversational layer is already event-driven. Instead of waiting for one large blocking response, the client receives a live stream of events from the runtime.
-
-This includes:
-
-- routing feedback
-- step progress
-- tool activity
-- streamed response tokens
-- completion/error events
-
-That is a strong architectural achievement because it makes the system feel interactive and transparent during longer operations.
-
-### 5. Skill-Oriented Agent Runtime
-
-The runtime already has the concept of skills and tool-backed execution. A user prompt is routed to a selected skill, and that skill decides which structured tool actions to run.
-
-This gives the project:
-
-- intent-based execution
-- separation between routing and action logic
-- an extensible pattern for future capabilities
-
-Even though this design will likely evolve later, it is already a meaningful step beyond plain command execution.
-
-## Current System Architecture
-
-The system is organized into four main layers.
+ShellMate is organized as four cooperating layers:
 
 ```text
-+-----------------------------+
-| Frontend                    |
-| Streamlit chat interface    |
-+-------------+---------------+
++---------------------------+
+| Frontend                  |
+| Interactive operator UI   |
++-------------+-------------+
               |
               v
-+-----------------------------+
-| Application Backend         |
-| FastAPI REST APIs           |
-+-------------+---------------+
++---------------------------+
+| Control APIs              |
+| Validation + management   |
++-------------+-------------+
               |
               v
-+-----------------------------+
-| Realtime Agent Layer        |
-| WebSocket gateway + runtime |
-+-------------+---------------+
++---------------------------+
+| Realtime Runtime          |
+| Routing + orchestration   |
++-------------+-------------+
               |
               v
-+-----------------------------+
-| Remote Execution Layer      |
-| SSH-based tools             |
-+-----------------------------+
++---------------------------+
+| Remote Execution Layer    |
+| SSH + deployment actions  |
++---------------------------+
 ```
 
-## Layer-by-Layer Explanation
+Each layer has a clear role:
 
-### Frontend Layer
+- the frontend acts as the user control surface
+- the API layer owns validated application operations
+- the runtime layer drives live agent behavior
+- the execution layer performs real work on remote servers
 
-The frontend is a Streamlit application that acts as the operator console for the system.
+## Core Capabilities
 
-Its job is to:
+The current architecture supports the following capabilities:
 
-- register new servers
-- upload `.pem` keys
-- connect to an available server
-- collect user prompts
-- display streamed agent replies
-- show the latest execution trace
+- remote server registration
+- SSH key-based access to Linux servers
+- connection testing
+- chat-driven server operations
+- live WebSocket streaming of agent execution
+- session-aware context handling
+- structured remote command execution
+- Docker-oriented deployment workflows with approval gates
 
-This makes the project usable even without building a custom web frontend yet.
+## Architecture Principles
 
-### Application Backend
+The project is built around a few engineering rules.
 
-The FastAPI backend is the structured control plane of the project. It owns the CRUD-style and validation-heavy operations that should not be part of the chat loop itself.
+### 1. Real Infrastructure
 
-This layer is responsible for:
+The system is grounded in real server state. When it checks logs, inspects a port, or runs a deployment action, it does so against the registered remote machine.
 
-- validating input
-- storing server records
-- storing uploaded key files
-- testing SSH connectivity
-- exposing direct command APIs
-- exposing standard HTTP chat endpoints
+### 2. Streaming Over Blocking
 
-This separation is important because not every action should depend on the agent runtime.
+Long-running operations should be observable while they happen. Instead of waiting for one final response, the system streams intermediate events such as routing decisions, stage transitions, tool execution, and final output.
 
-### Realtime Agent Layer
+### 3. Different Risk Levels Need Different Execution Models
 
-The realtime layer is where conversational behavior happens. It sits between the UI and the remote execution tools.
+Operational questions can be conversational.
 
-Its current responsibilities are:
+Deployment changes cannot.
 
-- accept chat messages over WebSocket
-- load recent session history
-- ask the router to choose a skill
-- execute the selected skill
-- stream events back to the frontend
-- persist conversation messages
+This is why ShellMate uses one flexible mode for daily operations and one deterministic mode for infrastructure change workflows.
 
-This layer gives the project its “live AI operator” behavior.
+### 4. Validation Before Mutation
 
-### Remote Execution Layer
+Before any structured deployment runs, the system validates prerequisites such as environment readiness, path existence, and port availability.
 
-The lowest layer is where the system actually interacts with a Linux machine.
+### 5. Approval Before Change
 
-Today, this is primarily SSH-driven. Tools use the SSH service to run commands on the selected server and return structured output back to the runtime.
+When the system is about to generate files or mutate deployment state, it stops and requests explicit user approval.
 
-This keeps the agent grounded in real server state rather than hallucinated answers.
+## Runtime Architecture
 
-## How One User Request Flows Through the System
+The runtime is the decision and execution core of the system.
 
-The current request lifecycle looks like this:
+At a high level, every user turn follows this model:
 
 ```text
-User enters prompt in UI
+User Input
    |
    v
-Frontend sends WebSocket chat payload
+Intent Routing
    |
-   v
-Gateway receives and validates message type
+   +--> Conversational Ops Mode
+   |      - dynamic reasoning
+   |      - flexible command selection
+   |      - fast operational responses
    |
-   v
-Runtime loads session history
-   |
-   v
-Router selects the best available skill
-   |
-   v
-Skill invokes one or more structured tools
-   |
-   v
-Tool executes action on remote server over SSH
-   |
-   v
-Events and tokens stream back to UI
-   |
-   v
-Session history is updated
+   +--> Structured Deployment Mode
+          - strict stage ordering
+          - validation gates
+          - approval checkpoints
+          - deterministic execution
 ```
 
-This is the most important architectural flow in the current project.
+This makes the system predictable without sacrificing usability.
 
-## Current Communication Model
+## Realtime Interaction Model
 
-The system uses two different communication models, each for a different kind of problem.
+ShellMate uses realtime streaming for the conversational experience.
 
-### REST for Structured App Operations
+The frontend sends a chat request to the runtime gateway, and the runtime streams back structured events as work progresses.
 
-HTTP endpoints are used where strong validation and predictable request/response behavior matter most.
+Typical streamed information includes:
 
-These operations include:
+- routing decisions
+- stage start and completion
+- tool execution details
+- tokenized assistant responses
+- errors
+- final completion
 
-- registering servers
-- listing servers
-- uploading keys
-- testing SSH connections
-- direct command execution
-- standard chat endpoints
+This event model makes the system auditable and easier to trust.
 
-### WebSockets for Realtime Agent Turns
+## Pillar 1 Architecture
 
-WebSockets are used for the actual live chat experience because agent turns can involve:
+The first pillar is designed for fast, conversational Linux operations.
 
-- internal routing decisions
-- multiple tool calls
-- incremental output
-- long-running tasks
+This mode is optimized for:
 
-This lets the UI stay responsive and makes the system easier to observe.
+- ad hoc diagnostics
+- quick answers
+- server introspection
+- operational troubleshooting
+- lightweight administrative actions
 
-## Current Runtime Design
+Behavior in this mode is intentionally flexible. The assistant can inspect recent conversation context, choose commands, run them remotely, and summarize results naturally.
 
-The runtime today is built around three ideas:
+This is the right operating model for prompts like:
 
-### 1. Session-Aware Chat
+- "check uptime"
+- "how much memory is free?"
+- "show nginx logs"
+- "is port 3000 open?"
+- "restart nginx"
 
-Conversation history is kept per session so follow-up prompts can use recent context.
+The first pillar is meant to feel like talking to a capable server operator.
 
-### 2. Skill Routing
+## Pillar 2 Architecture
 
-The system does not execute every request the same way. It first chooses a skill based on the prompt and recent history.
+The second pillar is designed for deployment workflows where correctness and safety matter more than conversational flexibility.
 
-### 3. Structured Tool Calls
+Deployment requests trigger a structured engine rather than free-form reasoning.
 
-Skills do not directly operate on infrastructure in an ad hoc way. They call tools that return structured execution results.
+This engine is based on fixed stages:
 
-This is a very good early architecture for an AI systems tool because it creates separation between:
+```text
+Validate
+   ->
+Gather
+   ->
+Generate
+   ->
+Approval
+   ->
+Execute
+   ->
+Verify
+   ->
+Summary
+```
 
-- understanding the request
-- deciding what to do
-- actually doing it
+The key property of this mode is that the system should not skip stages, reorder steps, or improvise destructive changes.
 
-## Current Skill Model
+That is what makes it suitable for production-oriented workflows.
 
-The project currently includes a small set of skills. These skills represent the first generation of the runtime design.
+## Structured Deployment Design
 
-They cover areas such as:
+The structured deployment engine is intentionally rule-based.
 
-- SSH-oriented server operations
-- web project generation and simple hosting
-- early Docker-oriented actions
+For Docker-focused deployment flows, the system should behave like a controlled pipeline:
 
-This means the skill system is already functioning as an extensibility mechanism, even though the exact skill boundaries will likely be improved later.
+### Validate
 
-## Current Tooling Model
+Checks preconditions such as:
 
-The current tooling layer is built around structured command execution. Tools translate higher-level skill decisions into concrete remote commands and return normalized results such as:
+- Docker availability
+- Docker Compose availability when needed
+- project directory presence
+- target port availability
 
-- command executed
-- stdout
-- stderr
-- exit status
+### Gather
 
-This is one of the most important achievements in the codebase because it makes remote execution inspectable and streamable.
+Collects only the details that cannot be inferred confidently from the user request or environment.
 
-## Session and State Handling
+### Generate
 
-The project already maintains in-memory session state for chat continuity. This means the runtime can preserve:
+Produces deployment artifacts such as Dockerfiles or Compose definitions when required.
 
-- prior user messages
-- prior assistant replies
-- the associated server context
+### Approval
 
-This is enough for a functional prototype and makes multi-turn interactions possible.
+Pauses before writing files or executing deployment changes.
 
-## Current Architecture
+### Execute
 
-There are several things that have been implemented
+Runs the exact deployment steps and streams progress live.
 
-### Clear Separation of Concerns
+### Verify
 
-The project has distinct layers for:
+Checks the result using status inspection, logs, and post-deployment validation.
 
-- UI
-- backend APIs
-- runtime orchestration
-- remote execution
+### Summary
 
-That makes the codebase easier to grow than a monolithic chatbot implementation.
+Explains the deployment outcome, current status, and suggested next actions.
 
-### Real Infrastructure Integration
+## Safety Model
 
-The system is  integrated with actual server access and remote command execution.
+ShellMate is designed around the idea that not all actions should be treated equally.
 
-### Observable Agent Behavior
+### Safe, Read-Oriented Actions
 
-The WebSocket event stream makes runtime behavior visible. That is especially valuable for infrastructure tools, where users need confidence in what is happening.
+These are suitable for conversational execution:
 
-### Extensible Runtime Pattern
+- checking status
+- reading logs
+- inspecting files
+- checking ports
+- retrieving metrics
 
-The skill-and-tool pattern gives the project a workable extensibility path for new capabilities.
+### Controlled Change Actions
 
-## Present Limitations
+These require structured handling and often approval:
 
-To keep the README accurate, it is important to state what is still limited right now.
+- generating deployment files
+- building images
+- starting containers
+- updating deployment state
+- restarting or replacing running workloads
 
-### Authentication Is Narrow
+### Destructive or Sensitive Actions
 
-The current access flow is centered on `.pem` private key authentication. Other SSH login methods are not yet part of the active implementation.
+These must be explicitly guarded:
 
-### Session Storage Is In-Memory
+- removing containers
+- deleting deployment resources
+- overwriting important files
+- replacing live services
 
-Chat state is currently stored in memory, which is fine for development but not ideal for long-term persistence or multi-instance scaling.
+This safety layering is central to the long-term reliability of the project.
 
-### Skill Routing Is Prototype-Level
+## State and Continuity
 
-The current router selects one skill per turn. This works for the present feature set, but it may become restrictive as workflows get more complex.
+The system maintains per-session continuity so it can support follow-up actions instead of treating every prompt as isolated.
 
-### Safety Enforcement Is Still Lightweight
+This allows behavior such as:
 
-Some operational safety rules exist at the prompt and workflow level, but a stronger code-enforced approval system is still a next-stage improvement.
+- continuing an operational conversation
+- pausing for deployment approval
+- resuming the structured pipeline after approval
+- keeping server-specific context across turns
 
-## This Project Represents 
+Statefulness is especially important for structured deployment flows because approvals and execution often happen across multiple messages.
 
-This project is a functional conversational control plane for Linux servers.
+## Observability
 
-It  demonstrates:
+A server operations system must be inspectable while it works.
 
-- real SSH connectivity
-- remote command execution
-- a structured FastAPI backend
-- WebSocket streaming chat
-- session-aware agent orchestration
-- skill-based tool execution
-- a usable Streamlit operator interface
+ShellMate is designed to expose its progress through structured event streaming so users can see:
 
-## Near-Term Direction
+- what mode it selected
+- what stage it is currently in
+- what tool action it is executing
+- what command or deployment action was run
+- whether verification passed or failed
 
-The next architectural improvements should build on the current foundation rather than replacing it completely.
+This is important for operator confidence, debugging, and future UI evolution.
 
-The most natural next steps are:
+## Current Scope
 
-- make session handling more durable and safe
-- strengthen WebSocket reliability
-- improve skill boundaries and routing quality
-- expand infrastructure tooling in a more structured way
+At the current stage, the platform is centered on:
 
-Those are evolutionary steps from the system that already exists today.
+- Linux server management over SSH
+- realtime conversational operations
+- structured Docker deployment flows
+
+Kubernetes is intentionally out of scope for the current phase. The focus right now is to make the Docker-oriented deployment engine solid before expanding further.
+
+## Why This Design Matters
+
+Most AI infrastructure assistants fail in one of two ways:
+
+- they are too free-form and unsafe for real changes
+- or they are too rigid and painful for everyday operations
+
+ShellMate avoids that trap by giving each category of work its own proper execution model:
+
+- flexible for day-to-day operations
+- deterministic for deployments
+
+That is the architectural identity of the project.
 
 ## Summary
 
-This project has  achieved  foundational part of an AI Linux server manager:
+ShellMate is an AI-assisted Linux server operations platform built on two pillars:
 
-- server onboarding
-- authenticated remote access
-- structured backend APIs
-- live streaming chat execution
-- skill-based runtime orchestration
-- real remote command execution
+- a conversational server management mode for daily operations
+- a structured deployment engine for safe Docker-based rollouts
 
-The architecture is already strong enough to support meaningful server operations, and it provides a solid base for the next phase of capabilities.
+Its architecture is designed around:
+
+- real SSH-backed execution
+- live streaming visibility
+- session-aware orchestration
+- validation before mutation
+- approval before deployment changes
+
+The result is a system that aims to be both usable in day-to-day server work and trustworthy when handling infrastructure changes.
