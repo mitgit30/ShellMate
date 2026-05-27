@@ -19,7 +19,9 @@ class DockerDeploymentPipeline:
     def stream(self, context: DeploymentContext) -> Iterator[dict]:
         if self._is_cancel_message(context.user_message):
             context.clear_pending()
-            for token in self._chunk_text("Pending deployment plan cancelled."):
+            for token in self._chunk_text(
+                "Okay, I cancelled the pending deployment plan. Nothing was changed on the server."
+            ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -39,22 +41,19 @@ class DockerDeploymentPipeline:
         }
 
         validation_errors = self._run_validation(context)
-        
+
         if validation_errors:
-            
             yield {
                 "type": "step_completed",
                 "step": "deployment_validate",
                 "detail": "Deployment validation blocked.",
             }
-            
+
             for token in self._chunk_text(
-                "Deployment validation failed:\n- " + "\n- ".join(validation_errors)):
-                
+                self._format_validation_message(validation_errors)
+            ):
                 yield {"type": "token", "content": token}
-                
             yield {"type": "done"}
-            
             return
 
         yield {
@@ -71,11 +70,7 @@ class DockerDeploymentPipeline:
             missing_inputs.append("port to expose")
 
         if missing_inputs:
-            question = (
-                "I can continue with the structured deployment flow, but I still need: "
-                + ", ".join(missing_inputs)
-                + ". Please reply with those details."
-            )
+            question = self._format_missing_inputs_message(missing_inputs)
             for token in self._chunk_text(question):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
@@ -86,30 +81,25 @@ class DockerDeploymentPipeline:
             "step": "deployment_generate",
             "detail": "Generating deployment files and plan.",
         }
-        #get the generated files
         generated_files = self._generate_files(context)
         context.generated_files = generated_files
         summary = self._build_approval_summary(context)
-        
-        context.save_pending(stage="awaiting_approval", summary=summary) # await for the approval
+
+        context.save_pending(stage="awaiting_approval", summary=summary)
         yield {
             "type": "step_completed",
             "step": "deployment_generate",
             "detail": "Deployment files generated and approval requested.",
         }
         for token in self._chunk_text(summary):
-            
             yield {"type": "token", "content": token}
-            
         yield {"type": "done"}
 
     def _resume_after_approval(self, context: DeploymentContext) -> Iterator[dict]:
-        
         pending = context.pending_state
         if not pending:
-            
             for token in self._chunk_text(
-                "There is no pending deployment plan to approve yet. Ask me to deploy a project first."
+                "There is no deployment plan waiting for approval right now. Ask me to prepare a deployment first."
             ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
@@ -121,7 +111,6 @@ class DockerDeploymentPipeline:
         context.exposed_port = pending.get("exposed_port")
         context.generated_files = dict(pending.get("generated_files", {}))
 
-    # for sending or streaming short alert messages to the user
         yield {
             "type": "step_started",
             "step": "deployment_execute",
@@ -144,7 +133,12 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment file upload failed.",
                 }
-                for token in self._chunk_text(tool_output):
+                for token in self._chunk_text(
+                    self._format_execution_failure(
+                        "I wasn't able to prepare the deployment files on the server.",
+                        tool_output,
+                    )
+                ):
                     yield {"type": "token", "content": token}
                 yield {"type": "done"}
                 return
@@ -163,7 +157,12 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment execution failed.",
                 }
-                for token in self._chunk_text(tool_output):
+                for token in self._chunk_text(
+                    self._format_execution_failure(
+                        "The deployment started, but one of the Docker steps failed.",
+                        tool_output,
+                    )
+                ):
                     yield {"type": "token", "content": token}
                 yield {"type": "done"}
                 return
@@ -202,29 +201,20 @@ class DockerDeploymentPipeline:
         if context.exposed_port:
             checks.append(("port", {"action": "check_port_free", "port": context.exposed_port}))
 
-        #check and handle the errors
         errors: list[str] = []
         for check_name, arguments in checks:
-            
             if check_name == "project_path" and arguments.get("target_path") is None:
-                
                 continue
             tool_event, _ = self._docker_tool.execute(server_id=context.server_id, arguments=arguments)
-            
+
             if tool_event.exit_status != 0:
-                
                 if check_name == "docker":
-                    
                     errors.append("Docker is not installed or not reachable on the server.")
                 elif check_name == "compose":
-                    
                     errors.append("Docker Compose is not available on the server.")
-                    
                 elif check_name == "project_path":
-                    
                     errors.append(f"Project directory '{context.project_path}' was not found.")
                 elif check_name == "port":
-                    
                     errors.append(f"Port {context.exposed_port} is already in use.")
 
         return errors
@@ -252,12 +242,9 @@ class DockerDeploymentPipeline:
         )
         content = response.get("message", {}).get("content", "") or ""
         try:
-            
             payload = json.loads(content)
-            
             compose_text = str(payload["docker_compose_yml"])
             dockerfile_text = str(payload["dockerfile"])
-            
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             compose_text = self._fallback_compose(context)
             dockerfile_text = self._fallback_dockerfile()
@@ -269,7 +256,6 @@ class DockerDeploymentPipeline:
         
 
     def _generate_single_app_files(self, context: DeploymentContext) -> dict[str, str]:
-        
         prompt = (
             "You generate a Dockerfile for deploying a single Linux-hosted app.\n"
             "Return JSON only with key dockerfile.\n"
@@ -290,12 +276,9 @@ class DockerDeploymentPipeline:
             dockerfile_text = self._fallback_dockerfile()
 
         return {"Dockerfile": dockerfile_text}
-    
 
     def _execution_actions(self, context: DeploymentContext) -> list[tuple[str, dict]]:
-        
         if context.deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
-            
             return [
                 (
                     "compose_config",
@@ -374,14 +357,61 @@ class DockerDeploymentPipeline:
     def _build_approval_summary(self, context: DeploymentContext) -> str:
         file_list = ", ".join(context.generated_files)
         return (
-            "Deployment approval required.\n"
-            f"Type: {context.deployment_type}\n"
+            "I have prepared the deployment plan.\n\n"
+            f"App: {context.app_name}\n"
+            f"Mode: {self._friendly_deployment_type(context.deployment_type)}\n"
             f"Project path: {context.project_path}\n"
-            f"App name: {context.app_name}\n"
-            f"Expose port: {context.exposed_port}\n"
-            f"Files to create/update: {file_list}\n\n"
-            "Reply with 'approve deployment' to continue."
+            f"Public port: {context.exposed_port}\n"
+            f"Files to create or update: {file_list}\n\n"
+            "If you want me to continue, reply with 'approve deployment'. "
+            "If you want to stop here, reply with 'cancel deployment'."
         )
+
+    @staticmethod
+    def _format_validation_message(errors: list[str]) -> str:
+        if len(errors) == 1:
+            return (
+                "I checked the server before starting the deployment.\n\n"
+                f"{errors[0]}\n\n"
+                "If you want, I can help you fix that first and then continue."
+            )
+
+        return (
+            "I checked the server before starting the deployment, and a few things need attention first:\n\n- "
+            + "\n- ".join(errors)
+            + "\n\nOnce these are fixed, I can continue with the deployment."
+        )
+
+    @staticmethod
+    def _format_missing_inputs_message(missing_inputs: list[str]) -> str:
+        if len(missing_inputs) == 1:
+            return (
+                "I’m ready to prepare the deployment, but I still need one detail from you: "
+                f"{missing_inputs[0]}."
+            )
+
+        return (
+            "I’m ready to prepare the deployment, but I still need these details from you: "
+            + ", ".join(missing_inputs)
+            + "."
+        )
+
+    @staticmethod
+    def _format_execution_failure(summary: str, tool_output: str) -> str:
+        return (
+            f"{summary}\n\n"
+            "I stopped the rollout at that point so nothing continues unexpectedly.\n\n"
+            "If you want, I can help inspect the error and suggest the next safe step.\n\n"
+            f"Technical details:\n{tool_output}"
+        )
+
+    @staticmethod
+    def _friendly_deployment_type(deployment_type: str) -> str:
+        if deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
+            return "Docker Compose deployment"
+        if deployment_type == DEPLOYMENT_TYPE_DOCKER_SINGLE:
+            return "Single-container Docker deployment"
+        return deployment_type.replace("_", " ").title()
 
     @staticmethod
     def _tool_called_event(action: str, command: str) -> dict:
