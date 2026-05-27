@@ -319,7 +319,7 @@ def render_chat_panel() -> None:
 
     render_last_agent_trace()
 
-    prompt = st.chat_input("Ask something like: check uptime or show disk usage")
+    prompt = st.chat_input("Ask something like: check uptime or deploy my app")
     if not prompt:
         return
 
@@ -363,8 +363,8 @@ def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:
     sidebar_servers = servers
 
     with st.sidebar:
-        st.header("Server Manager")
-        st.caption("Register servers, browse them, connect, and then chat.")
+        st.header("ShellMate")
+        st.caption("Connect a server, explore the environment, deploy safely, and build with chat.")
 
         if st.button("Chat", use_container_width=True):
             st.session_state.active_view = "chat"
@@ -403,17 +403,17 @@ def render_main_content(servers: list[dict]) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Linux Server Manager",
+        page_title="ShellMate",
         page_icon=":material/terminal:",
         layout="wide",
     )
     initialize_session_state()
     load_styles()
 
-    st.title("Chat-Based Linux Server Manager")
+    st.title("ShellMate")
     st.write(
-        "Register Linux hosts using a public IPv4 address, username selection,"
-        " and uploaded `.pem` key, then connect and use the WebSocket-powered agent chat."
+        "Your AI partner for Linux server operations, structured Docker deployments,"
+        " and static website building."
     )
 
     try:
