@@ -7,10 +7,8 @@ from src.skills.base import BaseSkill, SkillContext
 class DeploymentSkill(BaseSkill):
     id = "deployment"
     name = "Deployment Engine"
-    description = (
-        "Handles Docker deployment requests with a structured, approval-based pipeline "
-        "instead of free-form conversational execution."
-    )
+    description = ("Handles Docker deployment requests with a structured, approval-based pipeline "
+        "instead of free-form conversational execution." )
 
     def __init__(self, deployment_engine: DeploymentEngine) -> None:
         self._deployment_engine = deployment_engine
