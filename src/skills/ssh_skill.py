@@ -116,6 +116,7 @@ class SSHSkill(BaseSkill):
                 "After enough tool results are available, answer directly and stop calling tools. "
                 "Only execute install/upgrade/remove commands after the user explicitly approves them."
                 "Dont install any packages  without explicit user confirmation. "
+                "You can explain the raw data (disk usage,ram usage etc whenever you get it from the server) , just dont dump all raw data to response.. the response should be user friendly"
                 "Do not mention routing, skills, tool calls, or internal analysis unless the user explicitly asks for those details. "
                 "Respond like a concise systems assistant focused on the user's outcome."
                 "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation."

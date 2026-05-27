@@ -19,7 +19,8 @@ class SkillRouter:
             "You are a skill router for a Linux server management agent.\n"
             "Choose the single best skill for the user's intent.\n"
             "Base the decision on what the user is trying to accomplish on the connected Linux server.\n"
-            "Use the deployment skill for app(web,mern,html/css/js) deployment, Docker Compose setup, Dockerized updates, or approval follow-ups for a pending deployment.\n"
+            "Use the builder skill when the user wants you to create or design a website, landing page, portfolio, or static HTML/CSS/JS experience.\n"
+            "Use the deployment skill for app deployment, Docker Compose setup, Dockerized updates, or approval follow-ups for a pending deployment.\n"
             "Use the SSH skill for day-to-day server operations, diagnostics, logs, packages, and service checks.\n"
             "Do not describe assistant behavior, UI behavior, or generic troubleshooting unless the user explicitly asked about them.\n"
             "Return JSON only with keys: skill_id, reason.\n"
@@ -52,6 +53,12 @@ class SkillRouter:
     @staticmethod
     def _route_by_heuristic(user_message: str, history: list[dict]) -> SkillRouteDecision | None:
         lowered = user_message.lower()
+        if SkillRouter._is_builder_request(lowered):
+            return SkillRouteDecision(
+                skill_id="builder",
+                reason="Heuristic routing selected the website builder skill.",
+            )
+
         if SkillRouter._is_deployment_request(lowered):
             return SkillRouteDecision(
                 skill_id="deployment",
@@ -74,6 +81,34 @@ class SkillRouter:
             )
 
         return None
+
+    @staticmethod
+    def _is_builder_request(lowered: str) -> bool:
+        builder_terms = (
+            "build me a website",
+            "create a website",
+            "make a website",
+            "generate a website",
+            "landing page",
+            "portfolio website",
+            "build a portfolio",
+            "static website",
+            "html css js website",
+            "build me a homepage",
+            "design a website",
+            "hero section",
+            "product page",
+            "marketing page",
+            "restaurant website",
+        )
+        conversational_builder_terms = (
+            "what can you build",
+            "can you build websites",
+            "can you create websites",
+            "do you build websites",
+            "website builder",
+        )
+        return any(term in lowered for term in builder_terms + conversational_builder_terms)
 
     @staticmethod
     def _is_deployment_request(lowered: str) -> bool:

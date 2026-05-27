@@ -6,6 +6,7 @@ from backend.app.services.ssh_service import SSHService
 from src.deployments.engine import DeploymentEngine
 from src.runtime.agent import ServerOpsAgent
 from src.runtime.ollama_client import OllamaModelClient
+from src.skills.builder_skill import BuilderSkill
 from src.skills.registry import SkillRegistry
 from src.skills.deployment_skill import DeploymentSkill
 from src.skills.router import SkillRouter
@@ -22,13 +23,14 @@ session_store = InMemorySessionStore()
 model_client = OllamaModelClient()
 ssh_command_tool = SSHCommandTool(ssh_service=ssh_service)
 ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool)
+builder_skill = BuilderSkill(model_client=model_client)
 docker_tool = DockerTool(ssh_service=ssh_service)
 deployment_engine = DeploymentEngine(model_client=model_client, docker_tool=docker_tool)
 deployment_skill = DeploymentSkill(
     deployment_engine=deployment_engine,
     model_client=model_client,
 )
-skill_registry = SkillRegistry(skills=[ssh_skill, deployment_skill])
+skill_registry = SkillRegistry(skills=[ssh_skill, builder_skill, deployment_skill])
 skill_router = SkillRouter(model_client=model_client, skill_registry=skill_registry)
 server_ops_agent = ServerOpsAgent(
     skill_router=skill_router,
