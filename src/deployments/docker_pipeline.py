@@ -264,6 +264,9 @@ class DockerDeploymentPipeline:
         
 
     def _generate_single_app_files(self, context: DeploymentContext) -> dict[str, str]:
+        if self._is_static_site_project(context):
+            return self._generate_static_site_files(context)
+
         prompt = (
             "You generate a Dockerfile for deploying a single Linux-hosted app.\n"
             "Return JSON only with key dockerfile.\n"
@@ -284,6 +287,38 @@ class DockerDeploymentPipeline:
             dockerfile_text = self._fallback_dockerfile()
 
         return {"Dockerfile": dockerfile_text}
+
+    def _generate_static_site_files(self, context: DeploymentContext) -> dict[str, str]:
+        prompt = (
+            "You generate Docker deployment files for a static website.\n"
+            "The project already contains HTML, CSS, and JavaScript files.\n"
+            "Return JSON only with keys dockerfile and nginx_conf.\n"
+            "Use nginx as the runtime.\n"
+            "Serve the site from /usr/share/nginx/html.\n"
+            "Configure nginx to listen on port 80 and serve index.html for root requests.\n"
+            "Keep the files production-safe, minimal, and correct for a static site deployment.\n"
+            f"App name: {context.app_name}\n"
+            f"Project path: {context.project_path}\n"
+            f"Public port: {context.exposed_port}\n"
+            f"User request: {context.user_message}\n"
+        )
+        response = self._model_client.chat(
+            messages=[{"role": "system", "content": prompt}],
+            tools=[],
+        )
+        content = response.get("message", {}).get("content", "") or ""
+        try:
+            payload = json.loads(content)
+            dockerfile_text = str(payload["dockerfile"])
+            nginx_conf_text = str(payload["nginx_conf"])
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            dockerfile_text = self._fallback_static_dockerfile()
+            nginx_conf_text = self._fallback_nginx_conf()
+
+        return {
+            "Dockerfile": dockerfile_text,
+            "nginx.conf": nginx_conf_text,
+        }
 
     def _execution_actions(self, context: DeploymentContext) -> list[tuple[str, dict]]:
         if context.deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
@@ -319,7 +354,7 @@ class DockerDeploymentPipeline:
                     "action": "run_container",
                     "image_name": context.app_name,
                     "container_name": context.app_name,
-                    "port_mapping": f"{context.exposed_port}:{context.exposed_port}",
+                    "port_mapping": f"{context.exposed_port}:{self._container_port(context)}",
                 },
             ),
         ]
@@ -374,6 +409,38 @@ class DockerDeploymentPipeline:
             "If you want me to continue, reply with 'approve deployment'. "
             "If you want to stop here, reply with 'cancel deployment'."
         )
+
+    def _is_static_site_project(self, context: DeploymentContext) -> bool:
+        latest_builder_output = context.session_state.get("latest_builder_output", {})
+        if latest_builder_output.get("project_path") == context.project_path:
+            return True
+
+        lowered = context.user_message.lower()
+        if any(term in lowered for term in ("website", "landing page", "portfolio", "static site", "html css js")):
+            return True
+
+        index_exists = self._check_file_exists(context, "index.html")
+        package_exists = self._check_file_exists(context, "package.json")
+        requirements_exists = self._check_file_exists(context, "requirements.txt")
+        return index_exists and not package_exists and not requirements_exists
+
+    def _check_file_exists(self, context: DeploymentContext, filename: str) -> bool:
+        if not context.project_path:
+            return False
+        tool_event, _ = self._docker_tool.execute(
+            server_id=context.server_id,
+            arguments={
+                "action": "check_file",
+                "target_path": f"{context.project_path.rstrip('/')}/{filename}",
+            },
+        )
+        return tool_event.exit_status == 0
+
+    @staticmethod
+    def _container_port(context: DeploymentContext) -> int:
+        if "nginx.conf" in context.generated_files:
+            return 80
+        return int(context.exposed_port or 80)
 
     @staticmethod
     def _format_validation_message(errors: list[str]) -> str:
@@ -512,4 +579,28 @@ class DockerDeploymentPipeline:
             "COPY . /app\n"
             "RUN pip install --no-cache-dir -r requirements.txt\n"
             "CMD [\"python\", \"-m\", \"http.server\", \"8000\"]\n"
+        )
+
+    @staticmethod
+    def _fallback_static_dockerfile() -> str:
+        return (
+            "FROM nginx:1.27-alpine\n"
+            "COPY nginx.conf /etc/nginx/conf.d/default.conf\n"
+            "COPY . /usr/share/nginx/html\n"
+            "EXPOSE 80\n"
+            'CMD ["nginx", "-g", "daemon off;"]\n'
+        )
+
+    @staticmethod
+    def _fallback_nginx_conf() -> str:
+        return (
+            "server {\n"
+            "    listen 80;\n"
+            "    server_name _;\n"
+            "    root /usr/share/nginx/html;\n"
+            "    index index.html;\n\n"
+            "    location / {\n"
+            "        try_files $uri $uri/ /index.html;\n"
+            "    }\n"
+            "}\n"
         )
