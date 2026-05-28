@@ -100,6 +100,15 @@ class SkillRouter:
             "product page",
             "marketing page",
             "restaurant website",
+            "show code",
+            "show me the code",
+            "show html",
+            "show css",
+            "show javascript",
+            "show js",
+            "give me the code",
+            "display the code",
+            "view the code",
         )
         conversational_builder_terms = (
             "what can you build",
