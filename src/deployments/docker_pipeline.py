@@ -30,9 +30,17 @@ class DockerDeploymentPipeline:
             yield from self._resume_after_approval(context)
             return
 
+        pending = context.pending_state or {}
         context.project_path = self._extract_project_path(context.user_message)
         context.exposed_port = self._extract_port(context.user_message)
         context.app_name = self._extract_app_name(context.user_message, context.project_path)
+
+        if context.project_path is None:
+            context.project_path = pending.get("project_path")
+        if context.exposed_port is None:
+            context.exposed_port = pending.get("exposed_port")
+        if context.app_name == "app-service" and pending.get("app_name"):
+            context.app_name = pending.get("app_name")
 
         yield {
             "type": "step_started",
@@ -446,9 +454,12 @@ class DockerDeploymentPipeline:
 
     @staticmethod
     def _extract_port(message: str) -> int | None:
-        match = re.search(r"\bport\s+(\d{2,5})\b", message, re.IGNORECASE)
+        match = re.search(r"\bport\b\s*[:=\-]?\s*(\d{2,5})\b", message, re.IGNORECASE)
         if match:
             return int(match.group(1))
+        fallback = re.search(r"\b(?:on|at)\s+port\s*(\d{2,5})\b", message, re.IGNORECASE)
+        if fallback:
+            return int(fallback.group(1))
         return None
 
     @staticmethod
