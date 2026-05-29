@@ -2,10 +2,11 @@
 
 ## Overview
 
-ShellMate is an AI-assisted Linux server manager built around two operating modes:
+ShellMate is an AI-assisted Linux server manager built around three operating modes:
 
 - `Pillar 1: Day-to-Day Server Management`
 - `Pillar 2: Structured Deployment Engine`
+- `Pillar 3: Builder`
 
 The system is designed to let users work with Linux servers through natural language while keeping risky infrastructure changes controlled, observable, and reviewable.
 
@@ -13,7 +14,7 @@ This is not a generic chatbot wrapped around shell access. It is an event-driven
 
 ## Product Philosophy
 
-ShellMate separates infrastructure work into two different classes of behavior.
+ShellMate separates infrastructure work into three different classes of behavior.
 
 ### Pillar 1: Day-to-Day Server Management
 
@@ -45,6 +46,20 @@ It is used for deployment-related requests such as:
 
 In this mode, the system does not improvise. It switches out of conversational behavior and follows a deterministic pipeline with explicit validations, approvals, execution steps, and verification.
 
+### Pillar 3: Builder
+
+This mode is creative, design-oriented, and conversational at the front.
+
+It is used for requests such as:
+
+- build a landing page
+- create a portfolio website
+- design a static marketing site
+- generate a homepage in HTML, CSS, and JavaScript
+- refine an existing generated website
+
+Builder does not behave like a raw code dump. It first understands the website direction, then generates a polished static site, saves the files onto the connected server, and only shows the code when the user explicitly asks for it.
+
 This separation is the core design decision of the project.
 
 ## System Model
@@ -72,7 +87,7 @@ ShellMate is organized as four cooperating layers:
               v
 +---------------------------+
 | Remote Execution Layer    |
-| SSH + deployment actions  |
+| SSH + build/deploy actions|
 +---------------------------+
 ```
 
@@ -94,6 +109,7 @@ The current architecture supports the following capabilities:
 - live WebSocket streaming of agent execution
 - session-aware context handling
 - structured remote command execution
+- static website generation and server-side file creation
 - Docker-oriented deployment workflows with approval gates
 
 ## Architecture Principles
@@ -112,9 +128,15 @@ Long-running operations should be observable while they happen. Instead of waiti
 
 Operational questions can be conversational.
 
-Deployment changes cannot.
+Deployment changes must stay structurally controlled.
 
-This is why ShellMate uses one flexible mode for daily operations and one deterministic mode for infrastructure change workflows.
+Website creation should feel conversational at the outer layer, but remain intentional in how files are generated and saved.
+
+This is why ShellMate uses:
+
+- one flexible mode for daily operations
+- one controlled deployment mode for infrastructure change workflows
+- one creative builder mode for generating static websites
 
 ### 4. Validation Before Mutation
 
@@ -146,6 +168,12 @@ Intent Routing
           - validation gates
           - approval checkpoints
           - deterministic execution
+   |
+   +--> Builder Mode
+          - conversational discovery
+          - website generation
+          - server-side file creation
+          - refinement on follow-up prompts
 ```
 
 This makes the system predictable without sacrificing usability.
@@ -193,9 +221,9 @@ The first pillar is meant to feel like talking to a capable server operator.
 
 ## Pillar 2 Architecture
 
-The second pillar is designed for deployment workflows where correctness and safety matter more than conversational flexibility.
+The second pillar is designed for deployment workflows where correctness and safety matter more than execution freedom.
 
-Deployment requests trigger a structured engine rather than free-form reasoning.
+Deployment requests can still begin conversationally, but once the user is asking for an actual rollout, the system switches into a structured engine rather than free-form reasoning.
 
 This engine is based on fixed stages:
 
@@ -219,11 +247,31 @@ The key property of this mode is that the system should not skip stages, reorder
 
 That is what makes it suitable for production-oriented workflows.
 
+## Pillar 3 Architecture
+
+The third pillar is designed for website generation and design-focused code creation.
+
+Builder is intended for:
+
+- static HTML/CSS/JS websites
+- polished landing pages
+- portfolio and product sites
+- iterative visual refinement through follow-up prompts
+
+Its workflow is deliberately different from deployment:
+
+- vague requests stay conversational and move into a discovery step
+- clear website requests generate actual site files
+- generated files are saved onto the connected server
+- code is shown only when the user explicitly asks for it
+
+This keeps Builder useful for real creation work without overwhelming the user with implementation details too early.
+
 ## Structured Deployment Design
 
 The structured deployment engine is intentionally rule-based.
 
-For Docker-focused deployment flows, the system should behave like a controlled pipeline:
+For Docker-focused deployment flows, the system behaves like a controlled pipeline:
 
 ### Validate
 
@@ -240,7 +288,7 @@ Collects only the details that cannot be inferred confidently from the user requ
 
 ### Generate
 
-Produces deployment artifacts such as Dockerfiles or Compose definitions when required.
+Produces deployment artifacts such as Dockerfiles, nginx configs for static sites, or Compose definitions when required.
 
 ### Approval
 
@@ -302,9 +350,13 @@ This allows behavior such as:
 - continuing an operational conversation
 - pausing for deployment approval
 - resuming the structured pipeline after approval
+- preserving the latest generated website context
 - keeping server-specific context across turns
 
-Statefulness is especially important for structured deployment flows because approvals and execution often happen across multiple messages.
+Statefulness is especially important because:
+
+- approvals and execution often happen across multiple deployment messages
+- Builder needs to remember the latest generated website so it can refine or reveal the code later
 
 ## Observability
 
@@ -326,6 +378,8 @@ At the current stage, the platform is centered on:
 
 - Linux server management over SSH
 - realtime conversational operations
+- static website creation with HTML, CSS, and JavaScript
+- server-side persistence of generated website files
 - structured Docker deployment flows
 
 Kubernetes is intentionally out of scope for the current phase. The focus right now is to make the Docker-oriented deployment engine solid before expanding further.
@@ -340,16 +394,18 @@ Most AI infrastructure assistants fail in one of two ways:
 ShellMate avoids that trap by giving each category of work its own proper execution model:
 
 - flexible for day-to-day operations
-- deterministic for deployments
+- controlled for deployments
+- creative but guided for building websites
 
 That is the architectural identity of the project.
 
 ## Summary
 
-ShellMate is an AI-assisted Linux server operations platform built on two pillars:
+ShellMate is an AI-assisted Linux server operations platform built on three pillars:
 
 - a conversational server management mode for daily operations
 - a structured deployment engine for safe Docker-based rollouts
+- a Builder mode for generating static websites and saving them onto the server
 
 Its architecture is designed around:
 
