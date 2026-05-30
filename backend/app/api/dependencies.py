@@ -27,7 +27,11 @@ builder_tool = BuilderTool(ssh_service=ssh_service)
 ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool)
 builder_skill = BuilderSkill(model_client=model_client, builder_tool=builder_tool)
 docker_tool = DockerTool(ssh_service=ssh_service)
-deployment_engine = DeploymentEngine(model_client=model_client, docker_tool=docker_tool)
+deployment_engine = DeploymentEngine(
+    model_client=model_client,
+    docker_tool=docker_tool,
+    ssh_tool=ssh_command_tool,
+)
 deployment_skill = DeploymentSkill(
     deployment_engine=deployment_engine,
     model_client=model_client,

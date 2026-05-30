@@ -35,11 +35,6 @@ class DeploymentSkill(BaseSkill):
             yield {"type": "done"}
             return
 
-        yield {
-            "type": "step_started",
-            "step": "deployment_mode",
-            "detail": "Switched from conversational mode to structured deployment mode.",
-        }
         yield from self._deployment_engine.stream(context)
 
     def _build_conversational_reply(self, context: SkillContext) -> str:
