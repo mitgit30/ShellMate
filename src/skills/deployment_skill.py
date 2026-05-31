@@ -46,7 +46,9 @@ class DeploymentSkill(BaseSkill):
             "If the user is asking about capability, explain what you can do.\n"
             "If the user is asking how deployment would work, explain the flow simply.\n"
             "If the user is asking about installing Docker, explain the safe next step and mention that you can help check the server first.\n"
-            "Keep the answer concise, practical, and non-technical unless the user asks for more detail."
+            "Keep the answer concise, practical, and non-technical unless the user asks for more detail.\n\n"
+            "Structured server context:\n"
+            f"{context.server_context.prompt_summary()}"
         )
         response = self._model_client.chat(
             messages=[
@@ -98,6 +100,8 @@ class DeploymentSkill(BaseSkill):
         if any(term in lowered for term in action_terms):
             return False
         return any(term in lowered for term in conversational_terms) or lowered.endswith("?")
+
+
 
     @staticmethod
     def _chunk_text(text: str) -> Iterator[str]:

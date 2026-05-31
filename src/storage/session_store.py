@@ -6,7 +6,7 @@ class RuntimeSession:
     session_id: str
     server_id: str
     messages: list[dict] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)
+    server_context_json: str = "{}"
 
 
 class InMemorySessionStore:

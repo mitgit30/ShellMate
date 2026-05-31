@@ -119,7 +119,9 @@ class SSHSkill(BaseSkill):
                 "You can explain the raw data (disk usage,ram usage etc whenever you get it from the server) , just dont dump all raw data to response.. the response should be user friendly"
                 "Do not mention routing, skills, tool calls, or internal analysis unless the user explicitly asks for those details. "
                 "Respond like a concise systems assistant focused on the user's outcome."
-                "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation."
+                "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation.\n\n"
+                "Structured server context:\n"
+                f"{context.server_context.prompt_summary()}"
             ),
         }
         return [

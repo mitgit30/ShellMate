@@ -116,10 +116,12 @@ class BuilderSkill(BaseSkill):
             return
 
         saved_path = self._builder_tool.extract_saved_path(tool_event.stdout) or project_path
-        context.session_state["latest_builder_output"] = {
+        context.server_context.remember_builder_output(
+            {
             **result,
             "project_path": saved_path,
-        }
+            }
+        )
 
         yield {
             "type": "step_completed",
@@ -142,7 +144,7 @@ class BuilderSkill(BaseSkill):
             "step": "builder_show_code",
             "detail": "Sharing the latest generated site code.",
         }
-        latest = context.session_state.get("latest_builder_output")
+        latest = context.server_context.latest_builder_output
         if not latest:
             reply = (
                 "I don't have a generated website saved in this chat yet. "
@@ -178,7 +180,9 @@ class BuilderSkill(BaseSkill):
             "Respond warmly, clearly, and like a product expert.\n"
             "Explain that you can create beautiful static HTML/CSS/JS websites, adapt to brand and style direction, "
             "save the generated files onto the connected server, and then refine the result in follow-up prompts.\n"
-            "Keep the answer concise, natural, and user-friendly."
+            "Keep the answer concise, natural, and user-friendly.\n\n"
+            "Structured server context:\n"
+            f"{context.server_context.prompt_summary()}"
         )
         response = self._model_client.chat(
             messages=[
@@ -207,7 +211,9 @@ class BuilderSkill(BaseSkill):
             "- style or mood\n"
             "- main sections needed\n"
             "- optional brand name or target audience\n"
-            "Keep it concise, natural, and friendly."
+            "Keep it concise, natural, and friendly.\n\n"
+            "Structured server context:\n"
+            f"{context.server_context.prompt_summary()}"
         )
         response = self._model_client.chat(
             messages=[
@@ -240,6 +246,8 @@ class BuilderSkill(BaseSkill):
             "- Use a short, clean site_slug that fits the concept, not the full raw prompt.\n"
             "- The summary should describe what was built in a friendly way without dumping implementation details.\n"
             "- Do not wrap the JSON in markdown fences.\n"
+            "Use any relevant structured context below for continuity across the chat.\n"
+            f"{context.server_context.prompt_summary()}\n"
         )
         response = self._model_client.chat(
             messages=[
