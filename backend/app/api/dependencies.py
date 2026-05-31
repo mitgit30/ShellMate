@@ -6,6 +6,7 @@ from backend.app.services.ssh_service import SSHService
 from src.deployments.engine import DeploymentEngine
 from src.runtime.agent import ServerOpsAgent
 from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.server_context import ContextExtractor
 from src.skills.builder_skill import BuilderSkill
 from src.skills.registry import SkillRegistry
 from src.skills.deployment_skill import DeploymentSkill
@@ -22,6 +23,7 @@ ssh_service = SSHService(server_service=server_service)
 key_storage_service = KeyStorageService()
 session_store = InMemorySessionStore()
 model_client = OllamaModelClient()
+context_extractor = ContextExtractor(model_client=model_client)
 ssh_command_tool = SSHCommandTool(ssh_service=ssh_service)
 builder_tool = BuilderTool(ssh_service=ssh_service)
 ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool)
@@ -42,4 +44,5 @@ server_ops_agent = ServerOpsAgent(
     skill_router=skill_router,
     skill_registry=skill_registry,
     session_store=session_store,
+    context_extractor=context_extractor,
 )

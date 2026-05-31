@@ -1,6 +1,6 @@
-# This module defines the deployment context, which gathers all relevant information about a pending deployment request,including session details, user input, and the current state of the deployment process.It provides methods for saving and clearing pending deployment state within the session
-
 from dataclasses import dataclass, field
+
+from src.runtime.server_context import ServerContext
 
 
 DEPLOYMENT_TYPE_DOCKER_SINGLE = "docker_single_app"
@@ -13,7 +13,7 @@ class DeploymentContext:
     server_id: str
     user_message: str
     history: list[dict]
-    session_state: dict
+    server_context: ServerContext
     deployment_type: str
     project_path: str | None = None
     app_name: str | None = None
@@ -21,44 +21,35 @@ class DeploymentContext:
     generated_files: dict[str, str] = field(default_factory=dict)
 
     @property
-    def state_key(self) -> str:
-        return "pending_deployment"
+    def pending_state(self) -> dict:
+        return self.server_context.pending_deployment
 
     @property
-    def metadata_key(self) -> str:
-        return "deployment_context"
-
-    @property
-    def pending_state(self) -> dict | None:
-        return self.session_state.get(self.state_key)
-
-    @property
-    def metadata_state(self) -> dict:
-        return self.session_state.setdefault(self.metadata_key, {})
+    def deployment_state(self) -> dict:
+        return self.server_context.deployment
 
     def save_pending(self, stage: str, summary: str) -> None:
-        self.session_state[self.state_key] = {
-            "deployment_type": self.deployment_type,
-            "project_path": self.project_path,
-            "app_name": self.app_name,
-            "exposed_port": self.exposed_port,
-            "generated_files": self.generated_files,
-            "stage": stage,
-            "summary": summary,
-        }
+        self.server_context.set_pending_deployment(
+            {
+                "deployment_type": self.deployment_type,
+                "project_path": self.project_path,
+                "app_name": self.app_name,
+                "exposed_port": self.exposed_port,
+                "generated_files": self.generated_files,
+                "stage": stage,
+                "summary": summary,
+            }
+        )
+        self.sync_to_server_context()
 
     def clear_pending(self) -> None:
-        self.session_state.pop(self.state_key, None)
+        self.server_context.clear_pending_deployment()
 
-    def save_metadata(self) -> None:
-        metadata = self.metadata_state
-        metadata["deployment_type"] = self.deployment_type
+    def sync_to_server_context(self) -> None:
         if self.project_path:
-            metadata["project_path"] = self.project_path
-        if self.app_name:
-            metadata["app_name"] = self.app_name
+            self.server_context.remember_path(self.project_path, self.app_name)
+        if self.app_name and not self.server_context.active_project_name:
+            self.server_context.active_project_name = self.app_name
         if self.exposed_port:
-            metadata["exposed_port"] = self.exposed_port
-
-    def clear_metadata(self) -> None:
-        self.session_state.pop(self.metadata_key, None)
+            self.server_context.remember_port(self.exposed_port)
+        self.deployment_state["deployment_type"] = self.deployment_type
