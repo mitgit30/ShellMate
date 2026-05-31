@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from src.runtime.server_context import ServerContext
+
 
 @dataclass
 class SkillContext:
@@ -9,7 +11,7 @@ class SkillContext:
     server_id: str
     user_message: str
     history: list[dict]
-    session_state: dict
+    server_context: ServerContext
 
 
 class BaseSkill(ABC):

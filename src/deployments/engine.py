@@ -34,10 +34,10 @@ class DeploymentEngine:
             server_id=context.server_id,
             user_message=context.user_message,
             history=context.history,
-            session_state=context.session_state,
+            server_context=context.server_context,
             deployment_type=deployment_type,
         )
-        self._hydrate_from_metadata(deployment_context)
+        self._hydrate_from_server_context(deployment_context)
 
         if self._should_inspect_directories(deployment_context):
             yield from self._inspect_directories(deployment_context)
@@ -51,7 +51,7 @@ class DeploymentEngine:
         if parsed_port is not None:
             deployment_context.exposed_port = parsed_port
 
-        deployment_context.save_metadata()
+        deployment_context.sync_to_server_context()
 
         if self._needs_preparation_prompt(deployment_context):
             yield from self._ask_preparation_question(deployment_context)
@@ -67,24 +67,22 @@ class DeploymentEngine:
 
         yield from self._docker_pipeline.stream(deployment_context)
 
-    def _hydrate_from_metadata(self, context: DeploymentContext) -> None:
-        metadata = context.metadata_state
-        context.project_path = metadata.get("project_path")
-        context.app_name = metadata.get("app_name")
-        context.exposed_port = metadata.get("exposed_port")
+    def _hydrate_from_server_context(self, context: DeploymentContext) -> None:
+        context.project_path = context.server_context.active_project_path
+        context.app_name = context.server_context.active_project_name
+        context.exposed_port = context.server_context.active_port
 
     def _should_inspect_directories(self, context: DeploymentContext) -> bool:
         lowered = context.user_message.lower()
-        metadata = context.metadata_state
         has_check_language = any(
             term in lowered for term in ("check it", "look for", "inspect", "show directories", "find directories")
         )
         has_target_hint = any(term in lowered for term in ("shellmate-sites", "directory", "folder", "project"))
-        return has_check_language and has_target_hint or metadata.get("awaiting_directory_selection") and has_check_language
+        return has_check_language and has_target_hint or context.deployment_state.get("awaiting_directory_selection") and has_check_language
 
     def _inspect_directories(self, context: DeploymentContext) -> Iterator[dict]:
-        root_path = self._extract_root_path(context.user_message) or context.metadata_state.get("root_path") or "~/shellmate-sites"
-        context.metadata_state["root_path"] = root_path
+        root_path = self._extract_root_path(context.user_message) or context.deployment_state.get("root_path") or "~/shellmate-sites"
+        context.deployment_state["root_path"] = root_path
 
         yield {
             "type": "step_started",
@@ -127,9 +125,9 @@ class DeploymentEngine:
             return
 
         directories = self._parse_directories(tool_event.stdout)
-        context.metadata_state["suggested_directories"] = directories
-        context.metadata_state["awaiting_directory_selection"] = True
-        context.save_metadata()
+        context.server_context.candidate_paths = directories
+        context.deployment_state["awaiting_directory_selection"] = True
+        context.sync_to_server_context()
 
         yield {
             "type": "step_completed",
@@ -156,18 +154,17 @@ class DeploymentEngine:
     def _resolve_directory_selection(self, context: DeploymentContext) -> str | None:
         explicit_path = self._extract_explicit_path(context.user_message)
         if explicit_path:
-            context.metadata_state["awaiting_directory_selection"] = False
-            context.metadata_state["project_path"] = explicit_path
+            context.deployment_state["awaiting_directory_selection"] = False
+            context.server_context.remember_path(explicit_path)
             return explicit_path
 
-        directories = context.metadata_state.get("suggested_directories", [])
+        directories = context.server_context.candidate_paths
         lowered = context.user_message.lower()
         for directory in directories:
             basename = directory.rstrip("/").split("/")[-1].lower()
             if basename and basename in lowered:
-                context.metadata_state["awaiting_directory_selection"] = False
-                context.metadata_state["project_path"] = directory
-                context.metadata_state["app_name"] = basename.replace("_", "-")
+                context.deployment_state["awaiting_directory_selection"] = False
+                context.server_context.remember_path(directory, basename.replace("_", "-"))
                 return directory
 
         return None
@@ -178,8 +175,8 @@ class DeploymentEngine:
         return no_known_path and any(term in lowered for term in ("deploy", "deployment", "docker", "publish", "ship"))
 
     def _ask_preparation_question(self, context: DeploymentContext) -> Iterator[dict]:
-        context.metadata_state["awaiting_directory_discovery_consent"] = True
-        context.save_metadata()
+        context.deployment_state["awaiting_directory_discovery_consent"] = True
+        context.sync_to_server_context()
         message = (
             "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\n"
             "If yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\n"
@@ -190,10 +187,10 @@ class DeploymentEngine:
         yield {"type": "done"}
 
     def _needs_project_selection(self, context: DeploymentContext) -> bool:
-        return bool(context.metadata_state.get("awaiting_directory_selection")) and not context.project_path
+        return bool(context.deployment_state.get("awaiting_directory_selection")) and not context.project_path
 
     def _prompt_for_project_selection(self, context: DeploymentContext) -> Iterator[dict]:
-        directories = context.metadata_state.get("suggested_directories", [])
+        directories = context.server_context.candidate_paths
         if directories:
             lines = "\n".join(f"- `{directory}`" for directory in directories[:8])
             message = (
@@ -214,7 +211,7 @@ class DeploymentEngine:
         return context.project_path is not None and context.exposed_port is None
 
     def _prompt_for_port(self, context: DeploymentContext) -> Iterator[dict]:
-        context.save_metadata()
+        context.sync_to_server_context()
         app_target = context.project_path or "that project"
         message = (
             f"I’ve got the project path for `{app_target}`.\n\n"
@@ -230,13 +227,13 @@ class DeploymentEngine:
         if any(keyword in lowered for keyword in ("compose", "mern", "lamp", "multi-container", "multi service")):
             return DEPLOYMENT_TYPE_DOCKER_COMPOSE
 
-        pending = context.session_state.get("pending_deployment")
+        pending = context.server_context.pending_deployment
         if pending:
             return str(pending.get("deployment_type", DEPLOYMENT_TYPE_DOCKER_SINGLE))
 
-        metadata = context.session_state.get("deployment_context", {})
-        if metadata.get("deployment_type"):
-            return str(metadata["deployment_type"])
+        deployment_state = context.server_context.deployment
+        if deployment_state.get("deployment_type"):
+            return str(deployment_state["deployment_type"])
 
         return DEPLOYMENT_TYPE_DOCKER_SINGLE
 
