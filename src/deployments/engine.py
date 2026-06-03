@@ -21,6 +21,7 @@ class DeploymentEngine:
         docker_tool: DockerTool,
         ssh_tool: SSHCommandTool,
     ) -> None:
+        self._model_client = model_client
         self._docker_pipeline = DockerDeploymentPipeline(
             model_client=model_client,
             docker_tool=docker_tool,
@@ -38,18 +39,16 @@ class DeploymentEngine:
             deployment_type=deployment_type,
         )
         self._hydrate_from_metadata(deployment_context)
+        extracted = self._extract_preparation_details(deployment_context)
+        self._apply_preparation_details(deployment_context, extracted)
 
-        if self._should_inspect_directories(deployment_context):
+        if self._should_inspect_directories(deployment_context, extracted):
             yield from self._inspect_directories(deployment_context)
             return
 
-        selected_path = self._resolve_directory_selection(deployment_context)
+        selected_path = self._resolve_directory_selection(deployment_context, extracted)
         if selected_path:
             deployment_context.project_path = selected_path
-
-        parsed_port = self._extract_port(deployment_context.user_message)
-        if parsed_port is not None:
-            deployment_context.exposed_port = parsed_port
 
         deployment_context.save_metadata()
 
@@ -73,14 +72,12 @@ class DeploymentEngine:
         context.app_name = metadata.get("app_name")
         context.exposed_port = metadata.get("exposed_port")
 
-    def _should_inspect_directories(self, context: DeploymentContext) -> bool:
-        lowered = context.user_message.lower()
-        has_check_language = any(
-            term in lowered for term in ("check it", "look for", "inspect", "show directories", "find directories")
-        )
-        has_target_hint = any(term in lowered for term in ("shellmate-sites", "directory", "folder", "project"))
+    def _should_inspect_directories(self, context: DeploymentContext, extracted: dict) -> bool:
         metadata = context.metadata_state
-        return has_check_language and has_target_hint or metadata.get("awaiting_directory_selection") and has_check_language
+        intent = str(extracted.get("prep_intent", "")).strip().lower()
+        return intent == "inspect_directories" or (
+            metadata.get("awaiting_directory_selection") and intent == "continue_directory_help"
+        )
 
     def _inspect_directories(self, context: DeploymentContext) -> Iterator[dict]:
         root_path = self._extract_root_path(context.user_message) or context.metadata_state.get("root_path") or "~/shellmate-sites"
@@ -118,9 +115,7 @@ class DeploymentEngine:
                 "detail": "Directory inspection failed.",
             }
             for token in self._chunk_text(
-                "I couldn't inspect that server location yet.\n\n"
-                "If you want, send me the exact project path directly and I can continue from there.\n\n"
-                f"Technical details:\n{tool_output}"
+                self._render_discovery_failure(context, root_path, tool_output)
             ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
@@ -137,34 +132,26 @@ class DeploymentEngine:
             "detail": "Directory inspection completed.",
         }
 
-        if not directories:
-            message = (
-                f"I checked `{root_path}`, but I didn't find any immediate subdirectories to deploy from.\n\n"
-                "If you already know the project path, send it directly and I’ll continue."
-            )
-        else:
-            lines = "\n".join(f"- `{directory}`" for directory in directories[:8])
-            message = (
-                f"I checked `{root_path}` and found these likely project directories:\n\n"
-                f"{lines}\n\n"
-                "Send me the directory you want to deploy, and include the public port if you already know it."
-            )
+        message = self._render_discovery_result(context, root_path, directories)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
-    def _resolve_directory_selection(self, context: DeploymentContext) -> str | None:
-        explicit_path = self._extract_explicit_path(context.user_message)
-        if explicit_path:
+    def _resolve_directory_selection(self, context: DeploymentContext, extracted: dict) -> str | None:
+        explicit_path = extracted.get("project_path")
+        if isinstance(explicit_path, str) and explicit_path.strip():
+            resolved = explicit_path.strip().rstrip(".,")
             context.metadata_state["awaiting_directory_selection"] = False
-            context.metadata_state["project_path"] = explicit_path
-            return explicit_path
+            context.metadata_state["project_path"] = resolved
+            if extracted.get("app_name"):
+                context.metadata_state["app_name"] = str(extracted["app_name"]).strip().lower().replace("_", "-")
+            return resolved
 
         directories = context.metadata_state.get("suggested_directories", [])
-        lowered = context.user_message.lower()
+        selected_name = str(extracted.get("selected_directory_name", "")).strip().lower()
         for directory in directories:
             basename = directory.rstrip("/").split("/")[-1].lower()
-            if basename and basename in lowered:
+            if basename and selected_name and basename == selected_name:
                 context.metadata_state["awaiting_directory_selection"] = False
                 context.metadata_state["project_path"] = directory
                 context.metadata_state["app_name"] = basename.replace("_", "-")
@@ -180,11 +167,7 @@ class DeploymentEngine:
     def _ask_preparation_question(self, context: DeploymentContext) -> Iterator[dict]:
         context.metadata_state["awaiting_directory_discovery_consent"] = True
         context.save_metadata()
-        message = (
-            "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\n"
-            "If yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\n"
-            "If you already know the exact project path, send it directly along with the public port."
-        )
+        message = self._render_preparation_question(context)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
@@ -194,18 +177,7 @@ class DeploymentEngine:
 
     def _prompt_for_project_selection(self, context: DeploymentContext) -> Iterator[dict]:
         directories = context.metadata_state.get("suggested_directories", [])
-        if directories:
-            lines = "\n".join(f"- `{directory}`" for directory in directories[:8])
-            message = (
-                "I still need you to choose which directory to deploy.\n\n"
-                f"{lines}\n\n"
-                "Send the directory name or the full path, and include the public port if you know it."
-            )
-        else:
-            message = (
-                "I still need the project directory before I can prepare the deployment.\n\n"
-                "Send the full path and, if you know it, the public port you want to expose."
-            )
+        message = self._render_project_selection_prompt(context, directories)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
@@ -216,10 +188,7 @@ class DeploymentEngine:
     def _prompt_for_port(self, context: DeploymentContext) -> Iterator[dict]:
         context.save_metadata()
         app_target = context.project_path or "that project"
-        message = (
-            f"I’ve got the project path for `{app_target}`.\n\n"
-            "Now send me the public port you want to expose, for example `port 3000`."
-        )
+        message = self._render_port_prompt(context, app_target)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
@@ -240,45 +209,179 @@ class DeploymentEngine:
 
         return DEPLOYMENT_TYPE_DOCKER_SINGLE
 
-    @staticmethod
-    def _extract_port(message: str) -> int | None:
-        import re
-
-        match = re.search(r"\bport\b\s*[:=\-]?\s*(\d{2,5})\b", message, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-        fallback = re.search(r"\b(\d{2,5})\b", message)
-        if fallback:
-            value = int(fallback.group(1))
-            if 1 <= value <= 65535:
-                return value
-        return None
-
-    @staticmethod
-    def _extract_root_path(message: str) -> str | None:
-        import re
-
-        match = re.search(r"(?:check|inspect|look\s+for)\s+([~/.\w\-/]+)", message, re.IGNORECASE)
-        if match:
-            return match.group(1).strip().rstrip(".,")
-        return None
-
-    @staticmethod
-    def _extract_explicit_path(message: str) -> str | None:
-        import re
-
-        match = re.search(
-            r"(?:path|directory|folder|project)\s+(?:is\s+|at\s+)?([~/.\w\-/]+)",
-            message,
-            re.IGNORECASE,
+    def _extract_preparation_details(self, context: DeploymentContext) -> dict:
+        payload = self._generate_json(
+            instruction=(
+                "Extract deployment preparation details from the full conversation context. "
+                "Return JSON only with keys: prep_intent, project_path, app_name, exposed_port, root_path, selected_directory_name. "
+                "Valid prep_intent values: inspect_directories, continue_directory_help, provide_details, ask_for_preparation, continue. "
+                "Use null for unknown values. "
+                "Prefer conversation history and existing deployment metadata when they clearly refer to the same task."
+            ),
+            context=context,
+            extra={
+                "deployment_metadata": context.metadata_state,
+                "pending_deployment": context.pending_state or {},
+            },
         )
-        if match:
-            return match.group(1).strip().rstrip(".,")
-        if "/" in message or "~/" in message:
-            path_like = re.search(r"([~/][\w.\-/]+)", message)
-            if path_like:
-                return path_like.group(1).strip().rstrip(".,")
-        return None
+        normalized: dict[str, object] = {}
+        for key in ("prep_intent", "project_path", "app_name", "root_path", "selected_directory_name"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized[key] = value.strip().rstrip(".,")
+        exposed_port = payload.get("exposed_port")
+        if isinstance(exposed_port, int):
+            normalized["exposed_port"] = exposed_port
+        elif isinstance(exposed_port, str) and exposed_port.isdigit():
+            normalized["exposed_port"] = int(exposed_port)
+        return normalized
+
+    @staticmethod
+    def _apply_preparation_details(context: DeploymentContext, extracted: dict) -> None:
+        if extracted.get("project_path"):
+            context.project_path = str(extracted["project_path"])
+        if extracted.get("app_name"):
+            context.app_name = str(extracted["app_name"]).lower().replace(" ", "-")
+        if extracted.get("exposed_port") is not None:
+            context.exposed_port = int(extracted["exposed_port"])
+        if extracted.get("root_path"):
+            context.metadata_state["root_path"] = str(extracted["root_path"])
+
+    def _render_discovery_failure(self, context: DeploymentContext, root_path: str, tool_output: str) -> str:
+        return self._generate_text(
+            instruction=(
+                "The directory discovery step failed. "
+                "Explain that you could not inspect the requested server location, "
+                "mention the root path briefly, and suggest giving the exact project path directly."
+            ),
+            context=context,
+            extra={"root_path": root_path, "tool_output": tool_output},
+            fallback=(
+                "I couldn't inspect that server location yet.\n\n"
+                "If you want, send me the exact project path directly and I can continue from there.\n\n"
+                f"Technical details:\n{tool_output}"
+            ),
+        )
+
+    def _render_discovery_result(self, context: DeploymentContext, root_path: str, directories: list[str]) -> str:
+        return self._generate_text(
+            instruction=(
+                "Summarize the result of directory discovery for deployment preparation. "
+                "If directories were found, present them clearly and ask the user which one to deploy. "
+                "If none were found, say so and ask for the exact path."
+            ),
+            context=context,
+            extra={"root_path": root_path, "directories": directories[:8]},
+            fallback=(
+                f"I checked `{root_path}` and found these likely project directories:\n\n"
+                + "\n".join(f"- `{directory}`" for directory in directories[:8])
+                + "\n\nSend me the directory you want to deploy, and include the public port if you already know it."
+                if directories
+                else f"I checked `{root_path}`, but I didn't find any immediate subdirectories to deploy from.\n\nIf you already know the project path, send it directly and I’ll continue."
+            ),
+        )
+
+    def _render_preparation_question(self, context: DeploymentContext) -> str:
+        return self._generate_text(
+            instruction=(
+                "Ask the user whether you should inspect the server for likely project directories first, "
+                "or whether they want to provide the exact project path directly."
+            ),
+            context=context,
+            extra={"deployment_metadata": context.metadata_state},
+            fallback=(
+                "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\n"
+                "If yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\n"
+                "If you already know the exact project path, send it directly along with the public port."
+            ),
+        )
+
+    def _render_project_selection_prompt(self, context: DeploymentContext, directories: list[str]) -> str:
+        return self._generate_text(
+            instruction=(
+                "Ask the user to choose which directory should be deployed. "
+                "Use the discovered directories when available and keep the prompt natural."
+            ),
+            context=context,
+            extra={"directories": directories[:8]},
+            fallback=(
+                "I still need the project directory before I can prepare the deployment.\n\n"
+                "Send the full path and, if you know it, the public port you want to expose."
+            ),
+        )
+
+    def _render_port_prompt(self, context: DeploymentContext, app_target: str) -> str:
+        return self._generate_text(
+            instruction=(
+                "Ask the user for the public port to expose for the deployment. "
+                "Mention that you already have the project path."
+            ),
+            context=context,
+            extra={"app_target": app_target},
+            fallback=(
+                f"I’ve got the project path for `{app_target}`.\n\n"
+                "Now send me the public port you want to expose, for example `port 3000`."
+            ),
+        )
+
+    def _generate_json(self, instruction: str, context: DeploymentContext, extra: dict | None = None) -> dict:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are ShellMate's deployment preparation assistant.\n"
+                    f"{instruction}\n"
+                    "Return valid JSON only."
+                ),
+            },
+            *context.history[-8:],
+            {"role": "user", "content": context.user_message},
+        ]
+        if extra:
+            messages.append({"role": "system", "content": self._safe_json(extra)})
+        response = self._model_client.chat(messages=messages, tools=[])
+        content = response.get("message", {}).get("content", "") or "{}"
+        try:
+            payload = __import__("json").loads(content)
+            return payload if isinstance(payload, dict) else {}
+        except (__import__("json").JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def _generate_text(self, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are ShellMate's deployment preparation assistant.\n"
+                    f"{instruction}\n"
+                    "Respond naturally, clearly, and briefly. Do not mention internal pipeline mechanics."
+                ),
+            },
+            *context.history[-6:],
+            {"role": "user", "content": context.user_message},
+            {
+                "role": "system",
+                "content": self._safe_json(
+                    {
+                        "deployment_type": context.deployment_type,
+                        "project_path": context.project_path,
+                        "app_name": context.app_name,
+                        "exposed_port": context.exposed_port,
+                        "metadata": context.metadata_state,
+                        **(extra or {}),
+                    }
+                ),
+            },
+        ]
+        response = self._model_client.chat(messages=messages, tools=[])
+        content = (response.get("message", {}).get("content", "") or "").strip()
+        return content or fallback
+
+    @staticmethod
+    def _safe_json(payload: dict) -> str:
+        import json
+
+        return json.dumps(payload, ensure_ascii=True)
 
     @staticmethod
     def _directory_discovery_command(root_path: str) -> str:
