@@ -411,7 +411,7 @@ class DockerDeploymentPipeline:
         )
 
     def _is_static_site_project(self, context: DeploymentContext) -> bool:
-        latest_builder_output = context.server_context.latest_builder_output
+        latest_builder_output = context.session_state.get("latest_builder_output", {})
         if latest_builder_output.get("project_path") == context.project_path:
             return True
 

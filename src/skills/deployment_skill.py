@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 
+from src.memory.memory_manager import MemoryManager
 from src.deployments.engine import DeploymentEngine
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
@@ -13,7 +14,13 @@ class DeploymentSkill(BaseSkill):
         "structured, approval-based execution pipeline."
     )
 
-    def __init__(self, deployment_engine: DeploymentEngine, model_client: OllamaModelClient) -> None:
+    def __init__(
+        self,
+        deployment_engine: DeploymentEngine,
+        model_client: OllamaModelClient,
+        memory_manager: MemoryManager,
+    ) -> None:
+        super().__init__(memory_manager=memory_manager)
         self._deployment_engine = deployment_engine
         self._model_client = model_client
 
@@ -35,9 +42,11 @@ class DeploymentSkill(BaseSkill):
             yield {"type": "done"}
             return
 
+        self._seed_deployment_state_from_memory(context)
         yield from self._deployment_engine.stream(context)
 
     def _build_conversational_reply(self, context: SkillContext) -> str:
+        memory_block = self._memory_prompt_block(context)
         system_prompt = (
             "You are ShellMate's deployment assistant.\n"
             "The user is asking about deployments in a conversational way, not asking you to start a rollout yet.\n"
@@ -46,9 +55,8 @@ class DeploymentSkill(BaseSkill):
             "If the user is asking about capability, explain what you can do.\n"
             "If the user is asking how deployment would work, explain the flow simply.\n"
             "If the user is asking about installing Docker, explain the safe next step and mention that you can help check the server first.\n"
-            "Keep the answer concise, practical, and non-technical unless the user asks for more detail.\n\n"
-            "Structured server context:\n"
-            f"{context.server_context.prompt_summary()}"
+            "Keep the answer concise, practical, and non-technical unless the user asks for more detail."
+            + (f"\n\n{memory_block}" if memory_block else "")
         )
         response = self._model_client.chat(
             messages=[
@@ -100,6 +108,18 @@ class DeploymentSkill(BaseSkill):
         if any(term in lowered for term in action_terms):
             return False
         return any(term in lowered for term in conversational_terms) or lowered.endswith("?")
+
+    def _seed_deployment_state_from_memory(self, context: SkillContext) -> None:
+        metadata = context.session_state.setdefault("deployment_context", {})
+        if not metadata.get("project_path"):
+            project_path = self._memory_manager.latest_path(context.server_id)
+            if project_path:
+                metadata["project_path"] = project_path
+                metadata["app_name"] = project_path.rstrip("/").split("/")[-1].replace("_", "-")
+        if not metadata.get("exposed_port"):
+            exposed_port = self._memory_manager.latest_port(context.server_id)
+            if exposed_port:
+                metadata["exposed_port"] = exposed_port
 
 
 

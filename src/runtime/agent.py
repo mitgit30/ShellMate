@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 
+from src.memory.context_extractor import ContextExtractor
 from src.runtime.models import AgentTurnResult, ToolEvent
-from src.runtime.server_context import ContextExtractor, ServerContext
 from src.skills.base import SkillContext
 from src.skills.registry import SkillRegistry
 from src.skills.router import SkillRouter
@@ -47,7 +47,6 @@ class ServerOpsAgent:
     def stream_turn(self, session_id: str, server_id: str, user_message: str) -> Iterator[dict]:
         session = self._session_store.get_or_create(session_id=session_id, server_id=server_id)
         history = session.messages[-10:] # Limit history to the last 10 messages for routing and context.
-        server_context = ServerContext.from_json(session.server_context_json)
 
         route = self._skill_router.route(user_message=user_message, history=history)
         yield {"type": "intent_detected", "detail": route.reason}
@@ -63,7 +62,7 @@ class ServerOpsAgent:
             server_id=server_id,
             user_message=user_message,
             history=history,
-            server_context=server_context,
+            session_state=session.metadata,
         )
 
         reply_parts: list[str] = []
@@ -72,17 +71,22 @@ class ServerOpsAgent:
             if event["type"] == "token":
                 reply_parts.append(event["content"])
             elif event["type"] == "tool_event":
-                tool_outputs.append(event.get("stdout", "") or event.get("stderr", ""))
+                stdout = event.get("stdout", "")
+                stderr = event.get("stderr", "")
+                if stdout:
+                    tool_outputs.append(stdout)
+                if stderr:
+                    tool_outputs.append(stderr)
             yield event
 
         reply = "".join(reply_parts).strip()
-        updated_context = self._context_extractor.extract(
-            assistant_message=reply,
-            server_context=context.server_context,
+        self._context_extractor.extract(
+            server_id=server_id,
             user_message=user_message,
+            assistant_message=reply,
             tool_outputs=tool_outputs,
         )
-        session.server_context_json = updated_context.to_json()
+
         self._persist_session(
             session=session,
             user_message=user_message,

@@ -4,9 +4,10 @@ from backend.app.services.key_storage_service import KeyStorageService
 from backend.app.services.server_service import ServerService
 from backend.app.services.ssh_service import SSHService
 from src.deployments.engine import DeploymentEngine
+from src.memory.context_extractor import ContextExtractor
+from src.memory.memory_manager import MemoryManager
 from src.runtime.agent import ServerOpsAgent
 from src.runtime.ollama_client import OllamaModelClient
-from src.runtime.server_context import ContextExtractor
 from src.skills.builder_skill import BuilderSkill
 from src.skills.registry import SkillRegistry
 from src.skills.deployment_skill import DeploymentSkill
@@ -23,11 +24,12 @@ ssh_service = SSHService(server_service=server_service)
 key_storage_service = KeyStorageService()
 session_store = InMemorySessionStore()
 model_client = OllamaModelClient()
-context_extractor = ContextExtractor(model_client=model_client)
+memory_manager = MemoryManager()
+context_extractor = ContextExtractor(model_client=model_client, memory_manager=memory_manager)
 ssh_command_tool = SSHCommandTool(ssh_service=ssh_service)
 builder_tool = BuilderTool(ssh_service=ssh_service)
-ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool)
-builder_skill = BuilderSkill(model_client=model_client, builder_tool=builder_tool)
+ssh_skill = SSHSkill(model_client=model_client, ssh_tool=ssh_command_tool, memory_manager=memory_manager)
+builder_skill = BuilderSkill(model_client=model_client, builder_tool=builder_tool, memory_manager=memory_manager)
 docker_tool = DockerTool(ssh_service=ssh_service)
 deployment_engine = DeploymentEngine(
     model_client=model_client,
@@ -37,6 +39,7 @@ deployment_engine = DeploymentEngine(
 deployment_skill = DeploymentSkill(
     deployment_engine=deployment_engine,
     model_client=model_client,
+    memory_manager=memory_manager,
 )
 skill_registry = SkillRegistry(skills=[ssh_skill, builder_skill, deployment_skill])
 skill_router = SkillRouter(model_client=model_client, skill_registry=skill_registry)

@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterator
 
+from src.memory.memory_manager import MemoryManager
 from src.runtime.config import get_runtime_settings
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
@@ -15,7 +16,8 @@ class SSHSkill(BaseSkill):
         "services, logs, files, and command-driven operations."
     )
 
-    def __init__(self, model_client: OllamaModelClient, ssh_tool: SSHCommandTool) -> None:
+    def __init__(self, model_client: OllamaModelClient, ssh_tool: SSHCommandTool, memory_manager: MemoryManager) -> None:
+        super().__init__(memory_manager=memory_manager)
         self._model_client = model_client
         self._ssh_tool = ssh_tool
         self._settings = get_runtime_settings()
@@ -104,8 +106,8 @@ class SSHSkill(BaseSkill):
             suffix = " " if index < len(words) - 1 else ""
             yield word + suffix
 
-    @staticmethod
-    def _build_messages(context: SkillContext) -> list[dict]:
+    def _build_messages(self, context: SkillContext) -> list[dict]:
+        memory_block = self._memory_prompt_block(context)
         system_message = {
             "role": "system",
             "content": (
@@ -119,9 +121,8 @@ class SSHSkill(BaseSkill):
                 "You can explain the raw data (disk usage,ram usage etc whenever you get it from the server) , just dont dump all raw data to response.. the response should be user friendly"
                 "Do not mention routing, skills, tool calls, or internal analysis unless the user explicitly asks for those details. "
                 "Respond like a concise systems assistant focused on the user's outcome."
-                "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation.\n\n"
-                "Structured server context:\n"
-                f"{context.server_context.prompt_summary()}"
+                "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation."
+                + (f"\n\n{memory_block}" if memory_block else "")
             ),
         }
         return [
