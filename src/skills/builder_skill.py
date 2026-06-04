@@ -22,15 +22,17 @@ class BuilderSkill(BaseSkill):
         self._builder_tool = builder_tool
 
     def execute(self, context: SkillContext) -> Iterator[dict]:
-        if self._is_code_request(context.user_message):
+        intent = self._detect_builder_intent(context)
+
+        if intent == "show_code":
             yield from self._show_latest_code(context)
             return
 
-        if self._needs_discovery(context.user_message):
+        if intent == "discovery":
             yield from self._run_discovery(context)
             return
 
-        if self._is_capability_question(context.user_message):
+        if intent == "capability":
             yield from self._answer_capability_question(context)
             return
 
@@ -75,8 +77,20 @@ class BuilderSkill(BaseSkill):
             "detail": "Designing the website and preparing the site files.",
         }
 
-        result = self._generate_site(context)
-        project_path = self._resolve_project_path(context.user_message, result["site_slug"])
+        request_details = self._extract_build_request(context)
+        try:
+            result = self._generate_site(context, request_details)
+        except ValueError:
+            yield {
+                "type": "step_completed",
+                "step": "builder_generate",
+                "detail": "Builder could not generate a reliable website payload from the request.",
+            }
+            for token in self._chunk_text(self._render_generation_retry(context, request_details)):
+                yield {"type": "token", "content": token}
+            yield {"type": "done"}
+            return
+        project_path = self._resolve_project_path(request_details, result["site_slug"])
         files = {
             "index.html": result["index_html"],
             "styles.css": result["styles_css"],
@@ -108,11 +122,7 @@ class BuilderSkill(BaseSkill):
                 "step": "builder_generate",
                 "detail": "Site generation finished, but writing files to the server failed.",
             }
-            for token in self._chunk_text(
-                "I designed the website, but I couldn't save the files on the server yet.\n\n"
-                "If you want, I can help inspect the server-side issue next.\n\n"
-                f"Technical details:\n{tool_output}"
-            ):
+            for token in self._chunk_text(self._render_write_failure(context, tool_output)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -128,12 +138,7 @@ class BuilderSkill(BaseSkill):
             "step": "builder_generate",
             "detail": "Generated the site files and saved them on the server.",
         }
-        response = (
-            f"{result['summary']}\n\n"
-            f"I saved the website on the server at `{saved_path}`.\n"
-            "The folder includes `index.html`, `styles.css`, and `script.js`.\n\n"
-            "If you want, I can now refine the design, show you the code, or help you publish it."
-        )
+        response = self._render_generation_success(context, result, saved_path)
         for token in self._chunk_text(response):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
@@ -146,10 +151,7 @@ class BuilderSkill(BaseSkill):
         }
         latest = context.session_state.get("latest_builder_output")
         if not latest:
-            reply = (
-                "I don't have a generated website saved in this chat yet. "
-                "Ask me to create one first, and then I can show you the code."
-            )
+            reply = self._render_no_code_available(context)
         else:
             project_path = latest.get("project_path", "<unknown path>")
             reply = (
@@ -175,64 +177,42 @@ class BuilderSkill(BaseSkill):
 
     def _build_capability_reply(self, context: SkillContext) -> str:
         memory_block = self._memory_prompt_block(context)
-        prompt = (
-            "You are ShellMate's Builder assistant.\n"
-            "The user is asking about website-building capability or approach, not asking you to generate code yet.\n"
-            "Respond warmly, clearly, and like a product expert.\n"
-            "Explain that you can create beautiful static HTML/CSS/JS websites, adapt to brand and style direction, "
-            "save the generated files onto the connected server, and then refine the result in follow-up prompts.\n"
-            "Keep the answer concise, natural, and user-friendly."
-            + (f"\n\n{memory_block}" if memory_block else "")
-        )
-        response = self._model_client.chat(
-            messages=[
-                {"role": "system", "content": prompt},
-                *context.history[-6:],
-                {"role": "user", "content": context.user_message},
-            ],
-            tools=[],
-        )
-        content = response.get("message", {}).get("content", "") or ""
-        return content.strip() or (
-            "Yes. I can create static HTML, CSS, and JavaScript websites for you, "
-            "shape the design around the style you want, save the files onto the connected server, "
-            "and then keep refining the result with you."
+        return self._generate_text(
+            instruction=(
+                "The user is asking about Builder capability or approach, not asking you to generate code yet. "
+                "Respond warmly, clearly, and like a product expert. "
+                "Explain that you can create beautiful static HTML/CSS/JS websites, adapt to brand and style direction, "
+                "save the generated files onto the connected server, and refine the result in follow-up prompts."
+            ),
+            context=context,
+            fallback=(
+                "Yes. I can create static HTML, CSS, and JavaScript websites for you, "
+                "shape the design around the style you want, save the files onto the connected server, "
+                "and then keep refining the result with you."
+            ),
+            extra={"memory_block": memory_block},
         )
 
     def _build_discovery_reply(self, context: SkillContext) -> str:
         memory_block = self._memory_prompt_block(context)
-        prompt = (
-            "You are ShellMate's Builder assistant.\n"
-            "The user has expressed a broad intent to build a website, but the request is still too vague to generate a good result.\n"
-            "Do not generate code. Do not talk like an internal engine. Do not jump straight into implementation.\n"
-            "Respond like a thoughtful creative collaborator.\n"
-            "Briefly acknowledge the goal, then ask for the minimum high-value details needed to build a strong first version.\n"
-            "Prefer a compact guided prompt, such as asking for:\n"
-            "- website type or purpose\n"
-            "- style or mood\n"
-            "- main sections needed\n"
-            "- optional brand name or target audience\n"
-            "Keep it concise, natural, and friendly."
-            + (f"\n\n{memory_block}" if memory_block else "")
-        )
-        response = self._model_client.chat(
-            messages=[
-                {"role": "system", "content": prompt},
-                *context.history[-6:],
-                {"role": "user", "content": context.user_message},
-            ],
-            tools=[],
-        )
-        content = response.get("message", {}).get("content", "") or ""
-        return content.strip() or (
-            "Absolutely. Before I design it, tell me a bit about what you want:\n\n"
-            "1. What kind of website is it?\n"
-            "2. What style should it have?\n"
-            "3. What sections do you want on the page?\n\n"
-            "If you want, you can answer in one line and I’ll build the first version from that."
+        return self._generate_text(
+            instruction=(
+                "The user wants to build a website, but the request is still too vague to generate a strong result. "
+                "Do not generate code. Respond like a thoughtful creative collaborator. "
+                "Ask for the minimum high-value details needed to build a strong first version, such as website type, style, sections, brand name, or audience."
+            ),
+            context=context,
+            fallback=(
+                "Absolutely. Before I design it, tell me a bit about what you want:\n\n"
+                "1. What kind of website is it?\n"
+                "2. What style should it have?\n"
+                "3. What sections do you want on the page?\n\n"
+                "If you want, you can answer in one line and I’ll build the first version from that."
+            ),
+            extra={"memory_block": memory_block},
         )
 
-    def _generate_site(self, context: SkillContext) -> dict[str, str]:
+    def _generate_site(self, context: SkillContext, request_details: dict[str, object]) -> dict[str, str]:
         memory_block = self._memory_prompt_block(context)
         prompt = (
             "You are ShellMate's Builder engine for static websites.\n"
@@ -254,6 +234,7 @@ class BuilderSkill(BaseSkill):
                 {"role": "system", "content": prompt},
                 *context.history[-6:],
                 {"role": "user", "content": context.user_message},
+                {"role": "system", "content": json.dumps(request_details, ensure_ascii=True)},
             ],
             tools=[],
         )
@@ -268,74 +249,56 @@ class BuilderSkill(BaseSkill):
                 "script_js": str(payload["script_js"]).strip(),
             }
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            return self._fallback_site(context.user_message)
+            raise ValueError("Builder generation did not return a valid structured website payload.")
 
-    @staticmethod
-    def _needs_discovery(user_message: str) -> bool:
-        lowered = user_message.lower().strip()
-        vague_prompts = (
-            "i want to build a website",
-            "i want a website",
-            "build a website",
-            "create a website",
-            "make a website",
-            "website",
+    def _detect_builder_intent(self, context: SkillContext) -> str:
+        payload = self._generate_json(
+            instruction=(
+                "Classify the user's builder request. "
+                "Return JSON only with key intent. "
+                "Valid values: show_code, discovery, capability, generate. "
+                "Use discovery when the user wants a website but has not given enough design direction yet. "
+                "Use capability when the user is asking what Builder can do. "
+                "Use show_code when the user explicitly wants to see the code. "
+                "Otherwise use generate."
+            ),
+            context=context,
+            extra={"latest_builder_output": context.session_state.get("latest_builder_output", {})},
         )
-        return lowered in vague_prompts
+        intent = str(payload.get("intent", "generate")).strip().lower()
+        if intent in {"show_code", "discovery", "capability", "generate"}:
+            return intent
+        return "generate"
 
-    @staticmethod
-    def _is_capability_question(user_message: str) -> bool:
-        lowered = user_message.lower()
-        capability_terms = (
-            "what can you build",
-            "what can you do",
-            "can you build",
-            "do you build",
-            "can you create",
-            "how do you build",
-            "is it possible",
-            "do you support",
+    def _extract_build_request(self, context: SkillContext) -> dict[str, object]:
+        payload = self._generate_json(
+            instruction=(
+                "Extract the structured builder request from the full conversation context. "
+                "Return JSON only with keys: website_type, style_direction, sections, target_audience, brand_name, project_path, folder_name. "
+                "Use null for unknown scalar fields and [] for unknown sections. "
+                "If the user clearly specified a save path or folder name, include it."
+            ),
+            context=context,
+            extra={"latest_builder_output": context.session_state.get("latest_builder_output", {})},
         )
-        generation_terms = (
-            "build me",
-            "create a website",
-            "make a website",
-            "generate a website",
-            "landing page",
-            "portfolio website",
-            "homepage",
-            "html css js",
-            "static website",
-            "hero section",
-        )
-        if any(term in lowered for term in generation_terms):
-            return False
-        return any(term in lowered for term in capability_terms) or lowered.endswith("?")
+        normalized: dict[str, object] = {}
+        for key in ("website_type", "style_direction", "target_audience", "brand_name", "project_path", "folder_name"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized[key] = value.strip().rstrip(".,")
+        sections = payload.get("sections")
+        if isinstance(sections, list):
+            normalized["sections"] = [str(item).strip() for item in sections if str(item).strip()]
+        return normalized
 
-    @staticmethod
-    def _is_code_request(user_message: str) -> bool:
-        lowered = user_message.lower()
-        code_terms = (
-            "show code",
-            "show me the code",
-            "show html",
-            "show css",
-            "show javascript",
-            "show js",
-            "give me the code",
-            "display the code",
-            "view the code",
-        )
-        return any(term in lowered for term in code_terms)
+    def _resolve_project_path(self, request_details: dict[str, object], generated_slug: str) -> str:
+        explicit_path = request_details.get("project_path")
+        if isinstance(explicit_path, str) and explicit_path.strip():
+            return explicit_path.strip()
 
-    def _resolve_project_path(self, user_message: str, generated_slug: str) -> str:
-        explicit_path = self._extract_folder_path(user_message)
-        if explicit_path:
-            return explicit_path
-
-        explicit_name = self._extract_folder_name(user_message)
-        if explicit_name:
-            return f"~/shellmate-sites/{explicit_name}"
+        folder_name = request_details.get("folder_name")
+        if isinstance(folder_name, str) and folder_name.strip():
+            return f"~/shellmate-sites/{self._sanitize_slug(folder_name)}"
 
         return f"~/shellmate-sites/{generated_slug}"
 
@@ -366,104 +329,116 @@ class BuilderSkill(BaseSkill):
         cleaned = re.sub(r"[^a-z0-9]+", "-", raw_slug.lower()).strip("-")
         return cleaned[:40] or "shellmate-site"
 
-    @staticmethod
-    def _fallback_site(user_message: str) -> dict[str, str]:
-        title = "Generated Website"
-        return {
-            "summary": (
-                f"I created a first website draft based on your request: \"{user_message}\". "
-                "It has a polished responsive layout and a strong visual foundation that we can refine together."
+    def _render_write_failure(self, context: SkillContext, tool_output: str) -> str:
+        return self._generate_text(
+            instruction=(
+                "The website was generated, but saving the files to the server failed. "
+                "Explain that clearly, reassure the user the design work is ready, and offer to inspect the server-side issue next."
             ),
-            "site_slug": "website-draft",
-            "index_html": (
-                "<!DOCTYPE html>\n"
-                "<html lang=\"en\">\n"
-                "<head>\n"
-                "  <meta charset=\"UTF-8\" />\n"
-                "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n"
-                f"  <title>{title}</title>\n"
-                "  <link rel=\"stylesheet\" href=\"styles.css\" />\n"
-                "</head>\n"
-                "<body>\n"
-                "  <main class=\"page-shell\">\n"
-                "    <section class=\"hero\">\n"
-                "      <p class=\"eyebrow\">ShellMate Builder</p>\n"
-                "      <h1>Beautiful static site draft</h1>\n"
-                "      <p class=\"hero-copy\">A refined starting point with a flexible structure for follow-up edits.</p>\n"
-                "      <a class=\"hero-action\" href=\"#details\">Explore</a>\n"
-                "    </section>\n"
-                "    <section class=\"details\" id=\"details\">\n"
-                "      <article class=\"card\"><h2>Responsive</h2><p>Built to adapt across desktop and mobile screens.</p></article>\n"
-                "      <article class=\"card\"><h2>Polished</h2><p>Uses layered spacing, contrast, and visual rhythm.</p></article>\n"
-                "      <article class=\"card\"><h2>Editable</h2><p>Ready for your next refinement prompt.</p></article>\n"
-                "    </section>\n"
-                "  </main>\n"
-                "  <script src=\"script.js\"></script>\n"
-                "</body>\n"
-                "</html>"
+            context=context,
+            fallback=(
+                "I designed the website, but I couldn't save the files on the server yet.\n\n"
+                "If you want, I can help inspect the server-side issue next.\n\n"
+                f"Technical details:\n{tool_output}"
             ),
-            "styles_css": (
-                ":root {\n"
-                "  --bg: #f3efe7;\n"
-                "  --ink: #1c1a18;\n"
-                "  --accent: #b85c38;\n"
-                "  --panel: rgba(255, 255, 255, 0.68);\n"
-                "}\n"
-                "* { box-sizing: border-box; }\n"
-                "body {\n"
-                "  margin: 0;\n"
-                "  font-family: Georgia, 'Times New Roman', serif;\n"
-                "  color: var(--ink);\n"
-                "  background: radial-gradient(circle at top, #fff8ef, var(--bg));\n"
-                "}\n"
-                ".page-shell { min-height: 100vh; padding: 48px 20px; }\n"
-                ".hero {\n"
-                "  max-width: 960px;\n"
-                "  margin: 0 auto 36px;\n"
-                "  padding: 56px;\n"
-                "  border-radius: 28px;\n"
-                "  background: var(--panel);\n"
-                "  backdrop-filter: blur(10px);\n"
-                "  box-shadow: 0 18px 60px rgba(35, 26, 16, 0.12);\n"
-                "}\n"
-                ".eyebrow { text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); }\n"
-                "h1 { font-size: clamp(2.6rem, 8vw, 5.6rem); line-height: 0.95; margin: 12px 0; }\n"
-                ".hero-copy { max-width: 620px; font-size: 1.1rem; line-height: 1.7; }\n"
-                ".hero-action {\n"
-                "  display: inline-block;\n"
-                "  margin-top: 18px;\n"
-                "  padding: 14px 22px;\n"
-                "  border-radius: 999px;\n"
-                "  background: var(--ink);\n"
-                "  color: white;\n"
-                "  text-decoration: none;\n"
-                "}\n"
-                ".details {\n"
-                "  max-width: 960px;\n"
-                "  margin: 0 auto;\n"
-                "  display: grid;\n"
-                "  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n"
-                "  gap: 18px;\n"
-                "}\n"
-                ".card {\n"
-                "  padding: 24px;\n"
-                "  border-radius: 22px;\n"
-                "  background: rgba(255, 255, 255, 0.9);\n"
-                "  box-shadow: 0 12px 32px rgba(35, 26, 16, 0.08);\n"
-                "}\n"
-                "@media (max-width: 640px) { .hero { padding: 28px; } }\n"
+            extra={"tool_output": tool_output},
+        )
+
+    def _render_generation_success(self, context: SkillContext, result: dict[str, str], saved_path: str) -> str:
+        return self._generate_text(
+            instruction=(
+                "Summarize the generated website in a natural, user-friendly way. "
+                "Mention where it was saved on the server, mention the files created, "
+                "and offer the next helpful actions such as refine, show code, or publish."
             ),
-            "script_js": (
-                "document.querySelectorAll('a[href^=\"#\"]').forEach((link) => {\n"
-                "  link.addEventListener('click', (event) => {\n"
-                "    const target = document.querySelector(link.getAttribute('href'));\n"
-                "    if (!target) return;\n"
-                "    event.preventDefault();\n"
-                "    target.scrollIntoView({ behavior: 'smooth', block: 'start' });\n"
-                "  });\n"
-                "});"
+            context=context,
+            fallback=(
+                f"{result['summary']}\n\n"
+                f"I saved the website on the server at `{saved_path}`.\n"
+                "The folder includes `index.html`, `styles.css`, and `script.js`.\n\n"
+                "If you want, I can now refine the design, show you the code, or help you publish it."
             ),
-        }
+            extra={"builder_result": result, "saved_path": saved_path},
+        )
+
+    def _render_no_code_available(self, context: SkillContext) -> str:
+        return self._generate_text(
+            instruction=(
+                "Tell the user there is no generated website saved in this chat yet, "
+                "and ask them to create one first before requesting code."
+            ),
+            context=context,
+            fallback=(
+                "I don't have a generated website saved in this chat yet. "
+                "Ask me to create one first, and then I can show you the code."
+            ),
+        )
+
+    def _render_generation_retry(self, context: SkillContext, request_details: dict[str, object]) -> str:
+        return self._generate_text(
+            instruction=(
+                "The builder could not generate a reliable website from the current request. "
+                "Do not invent a generic site. Ask the user for a bit more concrete design direction so you can build the right thing."
+            ),
+            context=context,
+            fallback=(
+                "I’m not confident enough to generate the right website from the current request yet.\n\n"
+                "Give me a little more direction, like the website type, visual style, and main sections you want, and I’ll build a proper first version."
+            ),
+            extra={"request_details": request_details},
+        )
+
+    def _generate_json(self, instruction: str, context: SkillContext, extra: dict | None = None) -> dict:
+        memory_block = self._memory_prompt_block(context)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are ShellMate's Builder assistant.\n"
+                    f"{instruction}\n"
+                    "Return valid JSON only."
+                    + (f"\n\n{memory_block}" if memory_block else "")
+                ),
+            },
+            *context.history[-8:],
+            {"role": "user", "content": context.user_message},
+        ]
+        if extra:
+            messages.append({"role": "system", "content": json.dumps(extra, ensure_ascii=True)})
+        response = self._model_client.chat(messages=messages, tools=[])
+        content = response.get("message", {}).get("content", "") or "{}"
+        try:
+            payload = json.loads(content)
+            return payload if isinstance(payload, dict) else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def _generate_text(
+        self,
+        instruction: str,
+        context: SkillContext,
+        fallback: str,
+        extra: dict | None = None,
+    ) -> str:
+        memory_block = self._memory_prompt_block(context)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are ShellMate's Builder assistant.\n"
+                    f"{instruction}\n"
+                    "Respond naturally, clearly, and briefly."
+                    + (f"\n\n{memory_block}" if memory_block else "")
+                ),
+            },
+            *context.history[-6:],
+            {"role": "user", "content": context.user_message},
+        ]
+        if extra:
+            messages.append({"role": "system", "content": json.dumps(extra, ensure_ascii=True)})
+        response = self._model_client.chat(messages=messages, tools=[])
+        content = (response.get("message", {}).get("content", "") or "").strip()
+        return content or fallback
 
     @staticmethod
     def _chunk_text(text: str) -> Iterator[str]:
