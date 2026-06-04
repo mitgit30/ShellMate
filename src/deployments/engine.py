@@ -1,5 +1,6 @@
 # This module defines the deployment engine class, which serves as the main entry point for handling deployment-related requests.
 
+import json
 from collections.abc import Iterator
 
 from src.deployments.docker_pipeline import DockerDeploymentPipeline
@@ -193,20 +194,29 @@ class DeploymentEngine:
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
-    @staticmethod
-    def _select_deployment_type(context: SkillContext) -> str:
-        lowered = context.user_message.lower()
-        if any(keyword in lowered for keyword in ("compose", "mern", "lamp", "multi-container", "multi service")):
-            return DEPLOYMENT_TYPE_DOCKER_COMPOSE
-
+    def _select_deployment_type(self, context: SkillContext) -> str:
         pending = context.session_state.get("pending_deployment")
         if pending:
             return str(pending.get("deployment_type", DEPLOYMENT_TYPE_DOCKER_SINGLE))
 
         metadata = context.session_state.get("deployment_context", {})
-        if metadata.get("deployment_type"):
-            return str(metadata["deployment_type"])
+        remembered_type = metadata.get("deployment_type")
+        if remembered_type:
+            return str(remembered_type)
 
+        payload = self._generate_json_from_skill_context(
+            instruction=(
+                "Choose the deployment type for this request. "
+                "Return JSON only with key deployment_type. "
+                "Valid values: docker_single_app, docker_compose_app. "
+                "Use docker_compose_app for multi-service, compose, MERN, or LAMP style deployments. "
+                "Otherwise use docker_single_app."
+            ),
+            context=context,
+        )
+        deployment_type = str(payload.get("deployment_type", DEPLOYMENT_TYPE_DOCKER_SINGLE)).strip()
+        if deployment_type in {DEPLOYMENT_TYPE_DOCKER_COMPOSE, DEPLOYMENT_TYPE_DOCKER_SINGLE}:
+            return deployment_type
         return DEPLOYMENT_TYPE_DOCKER_SINGLE
 
     def _extract_preparation_details(self, context: DeploymentContext) -> dict:
@@ -345,6 +355,36 @@ class DeploymentEngine:
             payload = __import__("json").loads(content)
             return payload if isinstance(payload, dict) else {}
         except (__import__("json").JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def _generate_json_from_skill_context(self, instruction: str, context: SkillContext) -> dict:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are ShellMate's deployment preparation assistant.\n"
+                    f"{instruction}\n"
+                    "Return valid JSON only."
+                ),
+            },
+            *context.history[-8:],
+            {"role": "user", "content": context.user_message},
+            {
+                "role": "system",
+                "content": json.dumps(
+                    {
+                        "session_state": context.session_state,
+                    },
+                    ensure_ascii=True,
+                ),
+            },
+        ]
+        response = self._model_client.chat(messages=messages, tools=[])
+        content = response.get("message", {}).get("content", "") or "{}"
+        try:
+            payload = json.loads(content)
+            return payload if isinstance(payload, dict) else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
     def _generate_text(self, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
