@@ -270,6 +270,20 @@ class BuilderSkill(BaseSkill):
             raise ValueError("Builder generation did not return a valid structured website payload.")
 
     def _detect_builder_intent(self, context: SkillContext) -> str:
+        lowered = context.user_message.lower().strip()
+
+        if self._is_explicit_code_request(lowered):
+            return "show_code"
+
+        if self._is_explicit_generation_request(lowered):
+            return "generate"
+
+        if self._is_vague_builder_request(lowered):
+            return "discovery"
+
+        if self._is_capability_request(lowered):
+            return "capability"
+
         payload = self._generate_json(
             instruction=(
                 "Classify the user's builder request. "
@@ -287,6 +301,72 @@ class BuilderSkill(BaseSkill):
         if intent in {"show_code", "discovery", "capability", "generate"}:
             return intent
         return "generate"
+
+    @staticmethod
+    def _is_explicit_code_request(lowered: str) -> bool:
+        code_terms = (
+            "show code",
+            "show me the code",
+            "show html",
+            "show css",
+            "show javascript",
+            "show js",
+            "give me the code",
+            "display the code",
+            "view the code",
+            "send the code",
+        )
+        return any(term in lowered for term in code_terms)
+
+    @staticmethod
+    def _is_explicit_generation_request(lowered: str) -> bool:
+        generation_terms = (
+            "build me",
+            "create me",
+            "make me",
+            "build a",
+            "create a",
+            "make a",
+            "generate a",
+            "design a",
+            "landing page",
+            "portfolio website",
+            "homepage",
+            "product page",
+            "marketing page",
+            "restaurant website",
+            "static website",
+            "html css js",
+            "premium landing page",
+        )
+        return any(term in lowered for term in generation_terms)
+
+    @staticmethod
+    def _is_vague_builder_request(lowered: str) -> bool:
+        vague_prompts = (
+            "i want to build a website",
+            "i want a website",
+            "build a website",
+            "create a website",
+            "make a website",
+            "website",
+        )
+        return lowered in vague_prompts
+
+    @staticmethod
+    def _is_capability_request(lowered: str) -> bool:
+        capability_terms = (
+            "what can you build",
+            "what can you do",
+            "can you build",
+            "do you build",
+            "can you create",
+            "how do you build",
+            "is it possible",
+            "do you support",
+            "website builder",
+        )
+        return any(term in lowered for term in capability_terms) or lowered.endswith("?")
 
     def _extract_build_request(self, context: SkillContext) -> dict[str, object]:
         payload = self._generate_json(

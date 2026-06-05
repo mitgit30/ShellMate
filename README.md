@@ -44,7 +44,7 @@ It is used for deployment-related requests such as:
 - generate deployment files
 - validate environment readiness before rollout
 
-In this mode, the system does not improvise. It switches out of conversational behavior and follows a deterministic pipeline with explicit validations, approvals, execution steps, and verification.
+In this mode, the system does not improvise on infrastructure change. The engine keeps strict stage order and tool execution, while the LLM handles intent interpretation, parameter extraction, and user-facing communication inside that structure.
 
 ### Pillar 3: Builder
 
@@ -58,7 +58,7 @@ It is used for requests such as:
 - generate a homepage in HTML, CSS, and JavaScript
 - refine an existing generated website
 
-Builder does not behave like a raw code dump. It first understands the website direction, then generates a polished static site, saves the files onto the connected server, and only shows the code when the user explicitly asks for it.
+Builder does not behave like a raw code dump. It first understands the website direction, then generates a polished static site, saves the files onto the connected server, and only shows the code when the user explicitly asks for it. If the request is still too vague, it stays conversational and asks for stronger design direction instead of inventing a random generic website.
 
 This separation is the core design decision of the project.
 
@@ -111,6 +111,7 @@ The current architecture supports the following capabilities:
 - structured remote command execution
 - static website generation and server-side file creation
 - Docker-oriented deployment workflows with approval gates
+- file-based per-server memory for cross-pillar handoff
 
 ## Architecture Principles
 
@@ -225,6 +226,11 @@ The second pillar is designed for deployment workflows where correctness and saf
 
 Deployment requests can still begin conversationally, but once the user is asking for an actual rollout, the system switches into a structured engine rather than free-form reasoning.
 
+The important design rule is:
+
+- the engine decides what stage happens next
+- the LLM decides how to interpret the request and how to communicate the result
+
 This engine is based on fixed stages:
 
 ```text
@@ -264,6 +270,7 @@ Its workflow is deliberately different from deployment:
 - clear website requests generate actual site files
 - generated files are saved onto the connected server
 - code is shown only when the user explicitly asks for it
+- if generation is not grounded enough, Builder asks for better design direction instead of producing a generic fallback site
 
 This keeps Builder useful for real creation work without overwhelming the user with implementation details too early.
 
@@ -271,7 +278,13 @@ This keeps Builder useful for real creation work without overwhelming the user w
 
 The structured deployment engine is intentionally rule-based.
 
-For Docker-focused deployment flows, the system behaves like a controlled pipeline:
+For Docker-focused deployment flows, the system behaves like a controlled pipeline.
+
+Within that pipeline:
+
+- the stages stay fixed
+- tool execution stays deterministic
+- the LLM handles request interpretation, missing-detail extraction, approval understanding, and user-facing summaries
 
 ### Validate
 
@@ -343,7 +356,19 @@ This safety layering is central to the long-term reliability of the project.
 
 ## State and Continuity
 
-The system maintains per-session continuity so it can support follow-up actions instead of treating every prompt as isolated.
+The system maintains continuity so it can support follow-up actions instead of treating every prompt as isolated.
+
+ShellMate now uses a file-based memory layer per server:
+
+```text
+memory/
+  {server_id}/
+    handoff.md
+    server_facts.md
+    session.md
+```
+
+This memory is used to pass discovered facts across pillars. For example, if the SSH pillar finds a project path, the deployment pillar can reuse that fact on the next turn.
 
 This allows behavior such as:
 
@@ -352,11 +377,13 @@ This allows behavior such as:
 - resuming the structured pipeline after approval
 - preserving the latest generated website context
 - keeping server-specific context across turns
+- handing off discovered paths, ports, and environment facts between skills
 
-Statefulness is especially important because:
+This is especially important because:
 
 - approvals and execution often happen across multiple deployment messages
 - Builder needs to remember the latest generated website so it can refine or reveal the code later
+- different pillars may discover facts the next pillar should not have to ask for again
 
 ## Observability
 
