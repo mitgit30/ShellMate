@@ -23,3 +23,4 @@ def test_create_server_registers_pem_based_server(tmp_path: Path) -> None:
 
     assert created.id == "prod-01"
     assert len(service.list_servers()) == 1
+
