@@ -106,7 +106,7 @@ The current architecture supports the following capabilities:
 - SSH key-based access to Linux servers
 - connection testing
 - chat-driven server operations
-- live WebSocket streaming of agent execution
+- live HTTP streaming of agent execution
 - session-aware context handling
 - structured remote command execution
 - static website generation and server-side file creation

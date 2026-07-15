@@ -7,4 +7,3 @@ httpx
 ollama
 streamlit
 python-multipart # For file uploads in FastAPI
-websockets

@@ -274,7 +274,6 @@ dependencies = [
     { name = "python-multipart" },
     { name = "streamlit" },
     { name = "uvicorn" },
-    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -293,7 +292,6 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "streamlit", specifier = ">=1.57.0" },
     { name = "uvicorn", specifier = ">=0.46.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [package.metadata.requires-dev]

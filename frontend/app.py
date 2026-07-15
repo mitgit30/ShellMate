@@ -6,12 +6,10 @@ import httpx
 import streamlit as st
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from websockets.sync.client import connect
 
 
 class FrontendSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000/api/v1")
-    websocket_url: str = Field(default="ws://127.0.0.1:8765")
     stream_token_delay_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = SettingsConfigDict(
@@ -29,6 +27,11 @@ def get_settings() -> FrontendSettings:
 def get_api_client() -> httpx.Client:
     settings = get_settings()
     return httpx.Client(base_url=settings.api_base_url, timeout=30.0)
+
+
+def get_streaming_api_client() -> httpx.Client:
+    settings = get_settings()
+    return httpx.Client(base_url=settings.api_base_url, timeout=None)
 
 
 def initialize_session_state() -> None:
@@ -101,43 +104,40 @@ def test_connection(server_id: str) -> dict:
 def stream_chat_message(session_id: str, server_id: str, message: str):
     st.session_state.pending_tool_events = []
     st.session_state.pending_route_events = []
-    websocket_url = get_settings().websocket_url
     token_delay = get_settings().stream_token_delay_seconds
+    payload = {
+        "session_id": session_id,
+        "server_id": server_id,
+        "message": message,
+    }
 
-    with connect(websocket_url) as websocket:
-        websocket.send(
-            json.dumps(
-                {
-                    "type": "chat",
-                    "session_id": session_id,
-                    "server_id": server_id,
-                    "message": message,
-                }
-            )
-        )
+    with get_streaming_api_client() as client:
+        with client.stream("POST", "/chat/stream", json=payload) as response:
+            response.raise_for_status()
+            for raw_event in response.iter_lines():
+                if not raw_event:
+                    continue
 
-        while True:
-            raw_event = websocket.recv()
-            event = json.loads(raw_event)
-            event_type = event.get("type")
-            if event_type == "token":
-                if token_delay > 0:
-                    time.sleep(token_delay)
-                yield event.get("content", "")
-            elif event_type == "tool_event":
-                st.session_state.pending_tool_events.append(event)
-            elif event_type in {
-                "intent_detected",
-                "skill_selected",
-                "step_started",
-                "step_completed",
-                "tool_called",
-            }:
-                st.session_state.pending_route_events.append(event)
-            elif event_type == "error":
-                raise RuntimeError(event.get("detail", "WebSocket chat failed."))
-            elif event_type == "done":
-                break
+                event = json.loads(raw_event)
+                event_type = event.get("type")
+                if event_type == "token":
+                    if token_delay > 0:
+                        time.sleep(token_delay)
+                    yield event.get("content", "")
+                elif event_type == "tool_event":
+                    st.session_state.pending_tool_events.append(event)
+                elif event_type in {
+                    "intent_detected",
+                    "skill_selected",
+                    "step_started",
+                    "step_completed",
+                    "tool_called",
+                }:
+                    st.session_state.pending_route_events.append(event)
+                elif event_type == "error":
+                    raise RuntimeError(event.get("detail", "Streaming chat failed."))
+                elif event_type == "done":
+                    break
 
 
 def render_last_agent_trace() -> None:

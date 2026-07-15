@@ -9,8 +9,6 @@ class RuntimeSettings(BaseSettings):
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     ollama_api_key: str | None = None
     agent_max_turns: int = Field(default=10, ge=1, le=10)
-    websocket_host: str = Field(default="127.0.0.1")
-    websocket_port: int = Field(default=8765, ge=1, le=65535)
 
     model_config = SettingsConfigDict(
         env_file=".env",
