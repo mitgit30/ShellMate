@@ -19,7 +19,7 @@ class DockerDeploymentPipeline:
         turn_intent = self._detect_turn_intent(context)
 
         if turn_intent == "cancel":
-            context.clear_pending()
+            context.clear_state()
             for token in self._chunk_text(self._render_cancel_message(context)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
@@ -29,7 +29,7 @@ class DockerDeploymentPipeline:
             yield from self._resume_after_approval(context)
             return
 
-        pending = context.pending_state or {}
+        pending = context.state.to_dict() if context.state.has_pending_work else {}
         extracted = self._extract_request_details(context, pending)
         if extracted.get("project_path"):
             context.project_path = str(extracted["project_path"]).strip()
@@ -96,7 +96,7 @@ class DockerDeploymentPipeline:
         context.generated_files = generated_files
         summary = self._render_approval_summary(context)
 
-        context.save_pending(stage="awaiting_approval", summary=summary)
+        context.save_state(stage="awaiting_approval", summary=summary)
         yield {
             "type": "step_completed",
             "step": "deployment_generate",
@@ -107,7 +107,7 @@ class DockerDeploymentPipeline:
         yield {"type": "done"}
 
     def _resume_after_approval(self, context: DeploymentContext) -> Iterator[dict]:
-        pending = context.pending_state
+        pending = context.state.to_dict() if context.state.has_pending_approval else None
         if not pending:
             for token in self._chunk_text(self._render_no_pending_approval_message(context)):
                 yield {"type": "token", "content": token}
@@ -186,7 +186,7 @@ class DockerDeploymentPipeline:
             "detail": "Verifying deployment health and status.",
         }
         verification_output = self._run_verification(context)
-        context.clear_pending()
+        context.clear_state()
         yield {
             "type": "step_completed",
             "step": "deployment_verify",
@@ -541,7 +541,7 @@ class DockerDeploymentPipeline:
         }
 
     def _detect_turn_intent(self, context: DeploymentContext) -> str:
-        pending = context.pending_state or {}
+        pending = context.state.to_dict() if context.state.has_pending_approval else {}
         if not pending:
             return "new_request"
         payload = self._generate_json(
@@ -553,7 +553,7 @@ class DockerDeploymentPipeline:
                 "Use cancel only if the user is clearly stopping it."
             ),
             context=context,
-            extra={"pending_deployment": pending},
+            extra={"deployment_state": pending},
         )
         intent = str(payload.get("intent", "continue")).strip().lower()
         if intent in {"approve", "cancel"}:
@@ -569,7 +569,7 @@ class DockerDeploymentPipeline:
                 "Prefer facts already established in the recent history when they clearly refer to the current deployment request."
             ),
             context=context,
-            extra={"pending_deployment": pending},
+            extra={"deployment_state": pending},
         )
         normalized: dict[str, object] = {}
         project_path = payload.get("project_path")

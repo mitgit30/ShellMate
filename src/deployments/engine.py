@@ -6,6 +6,7 @@ from src.deployments.models import (
     DEPLOYMENT_TYPE_DOCKER_COMPOSE,
     DEPLOYMENT_TYPE_DOCKER_SINGLE,
     DeploymentContext,
+    DeploymentState,
 )
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import SkillContext
@@ -29,15 +30,18 @@ class DeploymentEngine:
 
     def stream(self, context: SkillContext) -> Iterator[dict]:
         deployment_type = self._select_deployment_type(context)
+        state = DeploymentState.from_session(context.session_state) or DeploymentState()
+        if not state.deployment_type:
+            state.deployment_type = deployment_type
+        state.persist(context.session_state)
         deployment_context = DeploymentContext(
             session_id=context.session_id,
             server_id=context.server_id,
             user_message=context.user_message,
             history=context.history,
             session_state=context.session_state,
-            deployment_type=deployment_type,
+            state=state,
         )
-        self._hydrate_from_metadata(deployment_context)
         extracted = self._extract_preparation_details(deployment_context)
         self._apply_preparation_details(deployment_context, extracted)
 
@@ -49,7 +53,7 @@ class DeploymentEngine:
         if selected_path:
             deployment_context.project_path = selected_path
 
-        deployment_context.save_metadata()
+        deployment_context.save_state()
 
         if self._needs_preparation_prompt(deployment_context):
             yield from self._ask_preparation_question(deployment_context)
@@ -65,22 +69,17 @@ class DeploymentEngine:
 
         yield from self._docker_pipeline.stream(deployment_context)
 
-    def _hydrate_from_metadata(self, context: DeploymentContext) -> None:
-        metadata = context.metadata_state
-        context.project_path = metadata.get("project_path")
-        context.app_name = metadata.get("app_name")
-        context.exposed_port = metadata.get("exposed_port")
 
     def _should_inspect_directories(self, context: DeploymentContext, extracted: dict) -> bool:
-        metadata = context.metadata_state
+        state = context.state
         intent = str(extracted.get("prep_intent", "")).strip().lower()
         return intent == "inspect_directories" or (
-            metadata.get("awaiting_directory_selection") and intent == "continue_directory_help"
+            state.get("awaiting_directory_selection") and intent == "continue_directory_help"
         )
 
     def _inspect_directories(self, context: DeploymentContext) -> Iterator[dict]:
-        root_path = self._extract_root_path(context.user_message) or context.metadata_state.get("root_path") or "~/shellmate-sites"
-        context.metadata_state["root_path"] = root_path
+        root_path = self._extract_root_path(context.user_message) or context.state.get("root_path") or "~/shellmate-sites"
+        context.state["root_path"] = root_path
 
         yield {
             "type": "step_started",
@@ -121,9 +120,9 @@ class DeploymentEngine:
             return
 
         directories = self._parse_directories(tool_event.stdout)
-        context.metadata_state["suggested_directories"] = directories
-        context.metadata_state["awaiting_directory_selection"] = True
-        context.save_metadata()
+        context.state["suggested_directories"] = directories
+        context.state["awaiting_directory_selection"] = True
+        context.save_state()
 
         yield {
             "type": "step_completed",
@@ -140,20 +139,20 @@ class DeploymentEngine:
         explicit_path = extracted.get("project_path")
         if isinstance(explicit_path, str) and explicit_path.strip():
             resolved = explicit_path.strip().rstrip(".,")
-            context.metadata_state["awaiting_directory_selection"] = False
-            context.metadata_state["project_path"] = resolved
+            context.state["awaiting_directory_selection"] = False
+            context.state["project_path"] = resolved
             if extracted.get("app_name"):
-                context.metadata_state["app_name"] = str(extracted["app_name"]).strip().lower().replace("_", "-")
+                context.state["app_name"] = str(extracted["app_name"]).strip().lower().replace("_", "-")
             return resolved
 
-        directories = context.metadata_state.get("suggested_directories", [])
+        directories = context.state.get("suggested_directories", [])
         selected_name = str(extracted.get("selected_directory_name", "")).strip().lower()
         for directory in directories:
             basename = directory.rstrip("/").split("/")[-1].lower()
             if basename and selected_name and basename == selected_name:
-                context.metadata_state["awaiting_directory_selection"] = False
-                context.metadata_state["project_path"] = directory
-                context.metadata_state["app_name"] = basename.replace("_", "-")
+                context.state["awaiting_directory_selection"] = False
+                context.state["project_path"] = directory
+                context.state["app_name"] = basename.replace("_", "-")
                 return directory
 
         return None
@@ -164,18 +163,18 @@ class DeploymentEngine:
         return no_known_path and any(term in lowered for term in ("deploy", "deployment", "docker", "publish", "ship"))
 
     def _ask_preparation_question(self, context: DeploymentContext) -> Iterator[dict]:
-        context.metadata_state["awaiting_directory_discovery_consent"] = True
-        context.save_metadata()
+        context.state["awaiting_directory_discovery_consent"] = True
+        context.save_state()
         message = self._render_preparation_question(context)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
     def _needs_project_selection(self, context: DeploymentContext) -> bool:
-        return bool(context.metadata_state.get("awaiting_directory_selection")) and not context.project_path
+        return bool(context.state.get("awaiting_directory_selection")) and not context.project_path
 
     def _prompt_for_project_selection(self, context: DeploymentContext) -> Iterator[dict]:
-        directories = context.metadata_state.get("suggested_directories", [])
+        directories = context.state.get("suggested_directories", [])
         message = self._render_project_selection_prompt(context, directories)
         for token in self._chunk_text(message):
             yield {"type": "token", "content": token}
@@ -185,7 +184,7 @@ class DeploymentEngine:
         return context.project_path is not None and context.exposed_port is None
 
     def _prompt_for_port(self, context: DeploymentContext) -> Iterator[dict]:
-        context.save_metadata()
+        context.save_state()
         app_target = context.project_path or "that project"
         message = self._render_port_prompt(context, app_target)
         for token in self._chunk_text(message):
@@ -193,14 +192,9 @@ class DeploymentEngine:
         yield {"type": "done"}
 
     def _select_deployment_type(self, context: SkillContext) -> str:
-        pending = context.session_state.get("pending_deployment")
-        if pending:
-            return str(pending.get("deployment_type", DEPLOYMENT_TYPE_DOCKER_SINGLE))
-
-        metadata = context.session_state.get("deployment_context", {})
-        remembered_type = metadata.get("deployment_type")
-        if remembered_type:
-            return str(remembered_type)
+        state = DeploymentState.from_session(context.session_state)
+        if state and state.deployment_type:
+            return str(state.deployment_type)
 
         payload = self._generate_json_from_skill_context(
             instruction=(
@@ -228,8 +222,7 @@ class DeploymentEngine:
             ),
             context=context,
             extra={
-                "deployment_metadata": context.metadata_state,
-                "pending_deployment": context.pending_state or {},
+                "deployment_state": context.state.to_dict(),
             },
         )
         normalized: dict[str, object] = {}
@@ -253,7 +246,7 @@ class DeploymentEngine:
         if extracted.get("exposed_port") is not None:
             context.exposed_port = int(extracted["exposed_port"])
         if extracted.get("root_path"):
-            context.metadata_state["root_path"] = str(extracted["root_path"])
+            context.state["root_path"] = str(extracted["root_path"])
 
     def _render_discovery_failure(self, context: DeploymentContext, root_path: str, tool_output: str) -> str:
         return self._generate_text(
@@ -296,7 +289,7 @@ class DeploymentEngine:
                 "or whether they want to provide the exact project path directly."
             ),
             context=context,
-            extra={"deployment_metadata": context.metadata_state},
+            extra={"deployment_state": context.state.to_dict()},
             fallback=(
                 "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\n"
                 "If yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\n"
@@ -405,7 +398,7 @@ class DeploymentEngine:
                         "project_path": context.project_path,
                         "app_name": context.app_name,
                         "exposed_port": context.exposed_port,
-                        "metadata": context.metadata_state,
+                        "deployment_state": context.state.to_dict(),
                         **(extra or {}),
                     }
                 ),

@@ -2,6 +2,7 @@ from collections.abc import Iterator
 
 from src.memory.memory_manager import MemoryManager
 from src.deployments.engine import DeploymentEngine
+from src.deployments.models import DeploymentState
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
 
@@ -110,16 +111,17 @@ class DeploymentSkill(BaseSkill):
         return any(term in lowered for term in conversational_terms) or lowered.endswith("?")
 
     def _seed_deployment_state_from_memory(self, context: SkillContext) -> None:
-        metadata = context.session_state.setdefault("deployment_context", {})
-        if not metadata.get("project_path"):
+        state = DeploymentState.from_session(context.session_state) or DeploymentState()
+        if not state.project_path:
             project_path = self._memory_manager.latest_path(context.server_id)
             if project_path:
-                metadata["project_path"] = project_path
-                metadata["app_name"] = project_path.rstrip("/").split("/")[-1].replace("_", "-")
-        if not metadata.get("exposed_port"):
+                state.project_path = project_path
+                state.app_name = project_path.rstrip("/").split("/")[-1].replace("_", "-")
+        if not state.exposed_port:
             exposed_port = self._memory_manager.latest_port(context.server_id)
             if exposed_port:
-                metadata["exposed_port"] = exposed_port
+                state.exposed_port = exposed_port
+        state.persist(context.session_state)
 
 
 
