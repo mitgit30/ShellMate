@@ -1,10 +1,10 @@
-import json
-import re
 from collections.abc import Iterator
+import json
 
 from src.memory.memory_manager import MemoryManager
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
+from src.skills.builder_helpers import (chunk_text, clean_summary, is_capability_request, is_explicit_code_request, is_explicit_generation_request, is_generic_slug, is_vague_builder_request, sanitize_slug)
 from src.tools.builder_tool import BuilderTool
 
 
@@ -50,7 +50,7 @@ class BuilderSkill(BaseSkill):
             "step": "builder_conversation",
             "detail": "Shared builder guidance without generating files.",
         }
-        for token in self._chunk_text(reply):
+        for token in chunk_text(reply):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -66,7 +66,7 @@ class BuilderSkill(BaseSkill):
             "step": "builder_discovery",
             "detail": "Asked for design details before generation.",
         }
-        for token in self._chunk_text(reply):
+        for token in chunk_text(reply):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -86,7 +86,7 @@ class BuilderSkill(BaseSkill):
                 "step": "builder_generate",
                 "detail": "Builder could not generate a reliable website payload from the request.",
             }
-            for token in self._chunk_text(self._render_generation_retry(context, request_details)):
+            for token in chunk_text(self._render_generation_retry(context, request_details)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -122,7 +122,7 @@ class BuilderSkill(BaseSkill):
                 "step": "builder_generate",
                 "detail": "Site generation finished, but writing files to the server failed.",
             }
-            for token in self._chunk_text(self._render_write_failure(context, tool_output)):
+            for token in chunk_text(self._render_write_failure(context, tool_output)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -139,7 +139,7 @@ class BuilderSkill(BaseSkill):
             "detail": "Generated the site files and saved them on the server.",
         }
         response = self._render_generation_success(context, result, saved_path)
-        for token in self._chunk_text(response):
+        for token in chunk_text(response):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -171,7 +171,7 @@ class BuilderSkill(BaseSkill):
             "step": "builder_show_code",
             "detail": "Returned the saved builder code on request.",
         }
-        for token in self._chunk_text(reply):
+        for token in chunk_text(reply):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -260,7 +260,7 @@ class BuilderSkill(BaseSkill):
                 user_message=context.user_message,
             )
             return {
-                "summary": self._clean_summary(str(payload["summary"]).strip(), context.user_message),
+                "summary": clean_summary(str(payload["summary"]).strip(), context.user_message),
                 "site_slug": slug,
                 "index_html": str(payload["index_html"]).strip(),
                 "styles_css": str(payload["styles_css"]).strip(),
@@ -272,16 +272,16 @@ class BuilderSkill(BaseSkill):
     def _detect_builder_intent(self, context: SkillContext) -> str:
         lowered = context.user_message.lower().strip()
 
-        if self._is_explicit_code_request(lowered):
+        if is_explicit_code_request(lowered):
             return "show_code"
 
-        if self._is_explicit_generation_request(lowered):
+        if is_explicit_generation_request(lowered):
             return "generate"
 
-        if self._is_vague_builder_request(lowered):
+        if is_vague_builder_request(lowered):
             return "discovery"
 
-        if self._is_capability_request(lowered):
+        if is_capability_request(lowered):
             return "capability"
 
         payload = self._generate_json(
@@ -301,72 +301,6 @@ class BuilderSkill(BaseSkill):
         if intent in {"show_code", "discovery", "capability", "generate"}:
             return intent
         return "generate"
-
-    @staticmethod
-    def _is_explicit_code_request(lowered: str) -> bool:
-        code_terms = (
-            "show code",
-            "show me the code",
-            "show html",
-            "show css",
-            "show javascript",
-            "show js",
-            "give me the code",
-            "display the code",
-            "view the code",
-            "send the code",
-        )
-        return any(term in lowered for term in code_terms)
-
-    @staticmethod
-    def _is_explicit_generation_request(lowered: str) -> bool:
-        generation_terms = (
-            "build me",
-            "create me",
-            "make me",
-            "build a",
-            "create a",
-            "make a",
-            "generate a",
-            "design a",
-            "landing page",
-            "portfolio website",
-            "homepage",
-            "product page",
-            "marketing page",
-            "restaurant website",
-            "static website",
-            "html css js",
-            "premium landing page",
-        )
-        return any(term in lowered for term in generation_terms)
-
-    @staticmethod
-    def _is_vague_builder_request(lowered: str) -> bool:
-        vague_prompts = (
-            "i want to build a website",
-            "i want a website",
-            "build a website",
-            "create a website",
-            "make a website",
-            "website",
-        )
-        return lowered in vague_prompts
-
-    @staticmethod
-    def _is_capability_request(lowered: str) -> bool:
-        capability_terms = (
-            "what can you build",
-            "what can you do",
-            "can you build",
-            "do you build",
-            "can you create",
-            "how do you build",
-            "is it possible",
-            "do you support",
-            "website builder",
-        )
-        return any(term in lowered for term in capability_terms) or lowered.endswith("?")
 
     def _extract_build_request(self, context: SkillContext) -> dict[str, object]:
         payload = self._generate_json(
@@ -396,58 +330,17 @@ class BuilderSkill(BaseSkill):
 
         folder_name = request_details.get("folder_name")
         if isinstance(folder_name, str) and folder_name.strip():
-            return f"~/shellmate-sites/{self._sanitize_slug(folder_name)}"
+            return f"~/shellmate-sites/{sanitize_slug(folder_name)}"
 
         return f"~/shellmate-sites/{generated_slug}"
 
-    @staticmethod
-    def _extract_folder_path(user_message: str) -> str | None:
-        match = re.search(
-            r"(?:path|folder path|directory)\s+(?:is\s+|at\s+)?([~/.\w\-/]+)",
-            user_message,
-            re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).strip().rstrip(".,")
-        return None
-
-    @staticmethod
-    def _extract_folder_name(user_message: str) -> str | None:
-        match = re.search(
-            r"(?:folder|directory)\s+(?:name\s+)?([a-zA-Z0-9_-]+)",
-            user_message,
-            re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).strip().lower()
-        return None
-
-    @staticmethod
-    def _sanitize_slug(raw_slug: str) -> str:
-        cleaned = re.sub(r"[^a-z0-9]+", "-", raw_slug.lower()).strip("-")
-        return cleaned[:40] or "shellmate-site"
-
     def _finalize_site_slug(self, raw_slug: str, request_details: dict[str, object], user_message: str) -> str:
-        sanitized = self._sanitize_slug(raw_slug)
-        if self._is_generic_slug(sanitized):
+        sanitized = sanitize_slug(raw_slug)
+        if is_generic_slug(sanitized):
             derived = self._derive_slug_from_request(request_details, user_message)
             if derived:
                 return derived
         return sanitized
-
-    @staticmethod
-    def _is_generic_slug(slug: str) -> bool:
-        generic = {
-            "website",
-            "website-draft",
-            "site",
-            "draft",
-            "shellmate-site",
-            "generated-website",
-            "website-template",
-            "static-website",
-        }
-        return slug in generic
 
     def _derive_slug_from_request(self, request_details: dict[str, object], user_message: str) -> str:
         candidates: list[str] = []
@@ -464,26 +357,10 @@ class BuilderSkill(BaseSkill):
             candidates.append(user_message.strip())
 
         for candidate in candidates:
-            slug = self._sanitize_slug(candidate)
-            if slug and not self._is_generic_slug(slug):
+            slug = sanitize_slug(candidate)
+            if slug and not is_generic_slug(slug):
                 return slug
         return "shellmate-site"
-
-    @staticmethod
-    def _clean_summary(summary: str, user_message: str) -> str:
-        cleaned = summary.strip()
-        prompt = user_message.strip().strip("\"'")
-        patterns = [
-            re.escape(prompt),
-            re.escape(f"\"{prompt}\""),
-            re.escape(f"'{prompt}'"),
-        ]
-        for pattern in patterns:
-            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" :,-\n\t")
-        if not cleaned:
-            return "I built the first version of the website with a clear visual direction and a solid structure we can refine further."
-        return cleaned
 
     def _render_write_failure(self, context: SkillContext, tool_output: str) -> str:
         return self._generate_text(
@@ -595,10 +472,3 @@ class BuilderSkill(BaseSkill):
         response = self._model_client.chat(messages=messages, tools=[])
         content = (response.get("message", {}).get("content", "") or "").strip()
         return content or fallback
-
-    @staticmethod
-    def _chunk_text(text: str) -> Iterator[str]:
-        words = text.split(" ")
-        for index, word in enumerate(words):
-            suffix = " " if index < len(words) - 1 else ""
-            yield word + suffix
