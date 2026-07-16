@@ -1,4 +1,4 @@
-# This module defines the deployment context, which gathers all relevant information about a pending deployment request,including session details, user input, and the current state of the deployment process.It provides methods for saving and clearing pending deployment state within the session
+"""Deployment state models used by the deployment workflow."""
 
 from dataclasses import dataclass, field
 

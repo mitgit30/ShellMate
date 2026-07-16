@@ -74,7 +74,7 @@ class DockerDeploymentPipeline:
         }
 
         missing_inputs: list[str] = []
-        if not context.project_path: # 
+        if not context.project_path:
             
             missing_inputs.append("project path")
         if not context.exposed_port:

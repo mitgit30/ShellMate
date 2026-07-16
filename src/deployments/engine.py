@@ -1,5 +1,3 @@
-# This module defines the deployment engine class, which serves as the main entry point for handling deployment-related requests.
-
 import json
 from collections.abc import Iterator
 

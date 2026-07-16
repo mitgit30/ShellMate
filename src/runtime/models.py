@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 
-class ToolEvent(BaseModel): # 
+class ToolEvent(BaseModel):
     tool_name: str
     command: str
     exit_status: int

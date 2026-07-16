@@ -28,7 +28,6 @@ def get_api_client() -> httpx.Client:
     settings = get_settings()
     return httpx.Client(base_url=settings.api_base_url, timeout=30.0)
 
-
 def get_streaming_api_client() -> httpx.Client:
     settings = get_settings()
     return httpx.Client(base_url=settings.api_base_url, timeout=None)
@@ -139,7 +138,6 @@ def stream_chat_message(session_id: str, server_id: str, message: str):
                 elif event_type == "done":
                     break
 
-
 def render_last_agent_trace() -> None:
     route_events = st.session_state.last_agent_events.get("route", [])
     tool_events = st.session_state.last_agent_events.get("tools", [])
@@ -171,7 +169,7 @@ def render_last_agent_trace() -> None:
                     
 
             
-        if route_lines: #  
+        if route_lines:
             st.markdown("\n".join(route_lines))
      
   
