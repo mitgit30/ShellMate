@@ -8,6 +8,7 @@ from src.deployments.models import (
 )
 from src.runtime.ollama_client import OllamaModelClient
 from src.tools.docker_tools import DockerTool
+from src.deployments.utils import chunk_text, derive_app_name, friendly_deployment_type
 
 
 class DockerDeploymentPipeline:
@@ -20,7 +21,7 @@ class DockerDeploymentPipeline:
 
         if turn_intent == "cancel":
             context.clear_state()
-            for token in self._chunk_text(self._render_cancel_message(context)):
+            for token in chunk_text(self._render_cancel_message(context)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -45,7 +46,7 @@ class DockerDeploymentPipeline:
         if not context.app_name and pending.get("app_name"):
             context.app_name = pending.get("app_name")
         if not context.app_name:
-            context.app_name = self._derive_app_name(context.project_path)
+            context.app_name = derive_app_name(context.project_path)
 
         yield {
             "type": "step_started",
@@ -62,7 +63,7 @@ class DockerDeploymentPipeline:
                 "detail": "Deployment validation blocked.",
             }
 
-            for token in self._chunk_text(self._render_validation_message(context, validation_errors)):
+            for token in chunk_text(self._render_validation_message(context, validation_errors)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -82,7 +83,7 @@ class DockerDeploymentPipeline:
 
         if missing_inputs:
             question = self._render_missing_inputs_message(context, missing_inputs)
-            for token in self._chunk_text(question):
+            for token in chunk_text(question):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -102,14 +103,14 @@ class DockerDeploymentPipeline:
             "step": "deployment_generate",
             "detail": "Deployment files generated and approval requested.",
         }
-        for token in self._chunk_text(summary):
+        for token in chunk_text(summary):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
     def _resume_after_approval(self, context: DeploymentContext) -> Iterator[dict]:
         pending = context.state.to_dict() if context.state.has_pending_approval else None
         if not pending:
-            for token in self._chunk_text(self._render_no_pending_approval_message(context)):
+            for token in chunk_text(self._render_no_pending_approval_message(context)):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -142,7 +143,7 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment file upload failed.",
                 }
-                for token in self._chunk_text(self._render_execution_failure(
+                for token in chunk_text(self._render_execution_failure(
                     context,
                     "I wasn't able to prepare the deployment files on the server.",
                     tool_output,
@@ -165,7 +166,7 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment execution failed.",
                 }
-                for token in self._chunk_text(self._render_execution_failure(
+                for token in chunk_text(self._render_execution_failure(
                     context,
                     "The deployment started, but one of the Docker steps failed.",
                     tool_output,
@@ -192,7 +193,7 @@ class DockerDeploymentPipeline:
             "step": "deployment_verify",
             "detail": "Verification completed.",
         }
-        for token in self._chunk_text(verification_output):
+        for token in chunk_text(verification_output):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -496,7 +497,7 @@ class DockerDeploymentPipeline:
             fallback=(
                 "I have prepared the deployment plan.\n\n"
                 f"App: {context.app_name}\n"
-                f"Mode: {self._friendly_deployment_type(context.deployment_type)}\n"
+                f"Mode: {friendly_deployment_type(context.deployment_type)}\n"
                 f"Project path: {context.project_path}\n"
                 f"Public port: {context.exposed_port}\n"
                 f"Files to create or update: {', '.join(context.generated_files)}\n\n"
@@ -644,26 +645,8 @@ class DockerDeploymentPipeline:
         content = (response.get("message", {}).get("content", "") or "").strip()
         return content or fallback
 
-    @staticmethod
-    def _derive_app_name(project_path: str | None) -> str:
-        if project_path:
-            return project_path.rstrip("/").split("/")[-1].lower().replace("_", "-")
-        return "app-service"
 
-    @staticmethod
-    def _friendly_deployment_type(deployment_type: str) -> str:
-        if deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
-            return "Docker Compose deployment"
-        if deployment_type == DEPLOYMENT_TYPE_DOCKER_SINGLE:
-            return "Single-container Docker deployment"
-        return deployment_type.replace("_", " ").title()
 
-    @staticmethod
-    def _chunk_text(text: str) -> Iterator[str]:
-        words = text.split(" ")
-        for index, word in enumerate(words):
-            suffix = " " if index < len(words) - 1 else ""
-            yield word + suffix
 
     @staticmethod
     def _fallback_compose(context: DeploymentContext) -> str:

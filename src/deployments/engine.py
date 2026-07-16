@@ -12,6 +12,7 @@ from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import SkillContext
 from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
+from src.deployments.utils import chunk_text, directory_discovery_command, parse_directories, safe_json
 
 
 class DeploymentEngine:
@@ -89,7 +90,7 @@ class DeploymentEngine:
         tool_event, tool_output = self._ssh_tool.execute(
             server_id=context.server_id,
             arguments={
-                "command": self._directory_discovery_command(root_path),
+                "command": directory_discovery_command(root_path),
                 "reason": "List likely project directories before deployment.",
             },
         )
@@ -112,14 +113,14 @@ class DeploymentEngine:
                 "step": "deployment_discovery",
                 "detail": "Directory inspection failed.",
             }
-            for token in self._chunk_text(
+            for token in chunk_text(
                 self._render_discovery_failure(context, root_path, tool_output)
             ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
 
-        directories = self._parse_directories(tool_event.stdout)
+        directories = parse_directories(tool_event.stdout)
         context.state["suggested_directories"] = directories
         context.state["awaiting_directory_selection"] = True
         context.save_state()
@@ -131,7 +132,7 @@ class DeploymentEngine:
         }
 
         message = self._render_discovery_result(context, root_path, directories)
-        for token in self._chunk_text(message):
+        for token in chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -166,7 +167,7 @@ class DeploymentEngine:
         context.state["awaiting_directory_discovery_consent"] = True
         context.save_state()
         message = self._render_preparation_question(context)
-        for token in self._chunk_text(message):
+        for token in chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -176,7 +177,7 @@ class DeploymentEngine:
     def _prompt_for_project_selection(self, context: DeploymentContext) -> Iterator[dict]:
         directories = context.state.get("suggested_directories", [])
         message = self._render_project_selection_prompt(context, directories)
-        for token in self._chunk_text(message):
+        for token in chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -187,7 +188,7 @@ class DeploymentEngine:
         context.save_state()
         app_target = context.project_path or "that project"
         message = self._render_port_prompt(context, app_target)
-        for token in self._chunk_text(message):
+        for token in chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
 
@@ -339,7 +340,7 @@ class DeploymentEngine:
             {"role": "user", "content": context.user_message},
         ]
         if extra:
-            messages.append({"role": "system", "content": self._safe_json(extra)})
+            messages.append({"role": "system", "content": safe_json(extra)})
         response = self._model_client.chat(messages=messages, tools=[])
         content = response.get("message", {}).get("content", "") or "{}"
         try:
@@ -392,7 +393,7 @@ class DeploymentEngine:
             {"role": "user", "content": context.user_message},
             {
                 "role": "system",
-                "content": self._safe_json(
+                "content": safe_json(
                     {
                         "deployment_type": context.deployment_type,
                         "project_path": context.project_path,
@@ -407,42 +408,3 @@ class DeploymentEngine:
         response = self._model_client.chat(messages=messages, tools=[])
         content = (response.get("message", {}).get("content", "") or "").strip()
         return content or fallback
-
-    @staticmethod
-    def _safe_json(payload: dict) -> str:
-        import json
-
-        return json.dumps(payload, ensure_ascii=True)
-
-    @staticmethod
-    def _directory_discovery_command(root_path: str) -> str:
-        if root_path == "~":
-            resolved = "$HOME"
-        elif root_path.startswith("~/"):
-            resolved = f'$HOME/{root_path[2:]}'
-        else:
-            resolved = root_path
-        return (
-            f'ROOT_PATH="{resolved}"\n'
-            'if [ ! -d "$ROOT_PATH" ]; then\n'
-            '  echo "__SHELLMATE_MISSING_ROOT__:$ROOT_PATH"\n'
-            "  exit 1\n"
-            "fi\n"
-            'find "$ROOT_PATH" -mindepth 1 -maxdepth 1 -type d | sort\n'
-        )
-
-    @staticmethod
-    def _parse_directories(stdout: str) -> list[str]:
-        directories: list[str] = []
-        for line in stdout.splitlines():
-            cleaned = line.strip()
-            if cleaned and not cleaned.startswith("__SHELLMATE_MISSING_ROOT__:"):
-                directories.append(cleaned)
-        return directories
-
-    @staticmethod
-    def _chunk_text(text: str) -> Iterator[str]:
-        words = text.split(" ")
-        for index, word in enumerate(words):
-            suffix = " " if index < len(words) - 1 else ""
-            yield word + suffix
