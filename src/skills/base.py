@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any
 from dataclasses import dataclass
 
 from src.memory.memory_manager import MemoryManager
@@ -40,5 +41,5 @@ class BaseSkill(ABC):
         return "\n\n".join(blocks)
 
     @abstractmethod
-    def execute(self, context: SkillContext) -> Iterator[dict]:
+    def execute(self, context: SkillContext) -> Iterator[Mapping[str, Any]]:
         raise NotImplementedError

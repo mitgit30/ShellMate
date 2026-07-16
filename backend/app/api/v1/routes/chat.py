@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from backend.app.api.dependencies import server_ops_agent
 from backend.app.core.exceptions import SSHConnectionError, ServerNotFoundError
 from backend.app.schemas.chat import ChatRequest, ChatResponse, ChatToolEvent
+from src.runtime.models import AgentEvent
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -51,14 +52,14 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
                 server_id=payload.server_id,
                 user_message=payload.message,
             ):
-                yield json.dumps(event) + "\n"
+                yield json.dumps(event.as_payload()) + "\n"
         except ServerNotFoundError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 404}) + "\n"
+            yield json.dumps(AgentEvent(type="error", detail=str(exc), status_code=404).as_payload()) + "\n"
         except SSHConnectionError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 502}) + "\n"
+            yield json.dumps(AgentEvent(type="error", detail=str(exc), status_code=502).as_payload()) + "\n"
         except ValueError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 400}) + "\n"
+            yield json.dumps(AgentEvent(type="error", detail=str(exc), status_code=400).as_payload()) + "\n"
         except RuntimeError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc), "status_code": 500}) + "\n"
+            yield json.dumps(AgentEvent(type="error", detail=str(exc), status_code=500).as_payload()) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")

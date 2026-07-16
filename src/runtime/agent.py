@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 
 from src.memory.context_extractor import ContextExtractor
-from src.runtime.models import AgentTurnResult, ToolEvent
+from src.runtime.models import AgentEvent, AgentTurnResult, ToolEvent
 from src.skills.base import SkillContext
 from src.skills.registry import SkillRegistry
 from src.skills.router import SkillRouter
@@ -29,24 +29,29 @@ class ServerOpsAgent:
             server_id=server_id,
             user_message=user_message,
         ):
-            if event["type"] == "token":
-                reply_parts.append(event["content"])
-            elif event["type"] == "tool_event":
+            if event.type == "token":
+                reply_parts.append(event.content or "")
+            elif event.type == "tool_event":
                 tool_events.append(
                     ToolEvent(
-                        tool_name=event["tool_name"],
-                        command=event["command"],
-                        exit_status=event["exit_status"],
-                        stdout=event.get("stdout", ""),
-                        stderr=event.get("stderr", ""),
+                        tool_name=event.tool_name or "",
+                        command=event.command or "",
+                        exit_status=event.exit_status or 0,
+                        stdout=event.stdout,
+                        stderr=event.stderr,
                     )
                 )
 
         return AgentTurnResult(reply="".join(reply_parts).strip(), tool_events=tool_events)
 
-    def stream_turn(self, session_id: str, server_id: str, user_message: str) -> Iterator[dict]:
+    def stream_turn(
+        self,
+        session_id: str,
+        server_id: str,
+        user_message: str,
+    ) -> Iterator[AgentEvent]:
         session = self._session_store.get_or_create(session_id=session_id, server_id=server_id)
-        history = session.messages[-10:] # Limit history to the last 10 messages for routing and context.
+        history = session.messages[-10:]
 
         try:
             route = self._skill_router.route(user_message=user_message, history=history)
@@ -55,17 +60,17 @@ class ServerOpsAgent:
                 "I ran into a problem while deciding how to handle that request.",
                 exc,
             )
-            yield {"type": "error", "detail": fallback_reply}
-            yield {"type": "done"}
+            yield AgentEvent(type="error", detail=fallback_reply)
+            yield AgentEvent(type="done")
             self._persist_session(session=session, user_message=user_message, reply=fallback_reply)
             return
 
-        yield {"type": "intent_detected", "detail": route.reason}
-        yield {
-            "type": "skill_selected",
-            "skill_id": route.skill_id,
-            "reason": route.reason,
-        }
+        yield AgentEvent(type="intent_detected", detail=route.reason)
+        yield AgentEvent(
+            type="skill_selected",
+            skill_id=route.skill_id,
+            reason=route.reason,
+        )
 
         try:
             skill = self._skill_registry.get(route.skill_id)
@@ -74,8 +79,8 @@ class ServerOpsAgent:
                 "I selected a workflow for the request, but I couldn't load it correctly.",
                 exc,
             )
-            yield {"type": "error", "detail": fallback_reply}
-            yield {"type": "done"}
+            yield AgentEvent(type="error", detail=fallback_reply)
+            yield AgentEvent(type="done")
             self._persist_session(session=session, user_message=user_message, reply=fallback_reply)
             return
 
@@ -90,24 +95,23 @@ class ServerOpsAgent:
         reply_parts: list[str] = []
         tool_outputs: list[str] = []
         try:
-            for event in skill.execute(context):
-                if event["type"] == "token":
-                    reply_parts.append(event["content"])
-                elif event["type"] == "tool_event":
-                    stdout = event.get("stdout", "")
-                    stderr = event.get("stderr", "")
-                    if stdout:
-                        tool_outputs.append(stdout)
-                    if stderr:
-                        tool_outputs.append(stderr)
+            for raw_event in skill.execute(context):
+                event = AgentEvent.model_validate(raw_event)
+                if event.type == "token":
+                    reply_parts.append(event.content or "")
+                elif event.type == "tool_event":
+                    if event.stdout:
+                        tool_outputs.append(event.stdout)
+                    if event.stderr:
+                        tool_outputs.append(event.stderr)
                 yield event
         except Exception as exc:
             fallback_reply = self._runtime_failure_message(
                 "I started working on that request, but the execution flow failed unexpectedly.",
                 exc,
             )
-            yield {"type": "error", "detail": fallback_reply}
-            yield {"type": "done"}
+            yield AgentEvent(type="error", detail=fallback_reply)
+            yield AgentEvent(type="done")
             self._persist_session(session=session, user_message=user_message, reply=fallback_reply)
             return
 
