@@ -8,6 +8,7 @@ from src.deployments.models import (
 )
 from src.runtime.ollama_client import OllamaModelClient
 from src.tools.docker_tools import DockerTool
+from src.deployments.docker_helpers import (container_port, execution_actions, fallback_compose, fallback_dockerfile, fallback_nginx_conf, fallback_static_dockerfile, is_static_site_request, normalize_request_details, tool_called_event, tool_event_payload)
 from src.deployments.utils import chunk_text, derive_app_name, friendly_deployment_type
 
 
@@ -135,8 +136,8 @@ class DockerDeploymentPipeline:
                     "target_path": f"{context.project_path}/{filename}",
                     "content": content,
                 },)
-            yield self._tool_called_event("write_file", tool_event.command)
-            yield self._tool_event(tool_event)
+            yield tool_called_event("write_file", tool_event.command)
+            yield tool_event_payload(tool_event)
             if tool_event.exit_status != 0:
                 yield {
                     "type": "step_completed",
@@ -152,14 +153,14 @@ class DockerDeploymentPipeline:
                 yield {"type": "done"}
                 return
 
-        execution_actions = self._execution_actions(context)
-        for action, arguments in execution_actions:
+        actions = execution_actions(context)
+        for action, arguments in actions:
             tool_event, tool_output = self._docker_tool.execute(
                 server_id=context.server_id,
                 arguments=arguments,
             )
-            yield self._tool_called_event(action, tool_event.command)
-            yield self._tool_event(tool_event)
+            yield tool_called_event(action, tool_event.command)
+            yield tool_event_payload(tool_event)
             if tool_event.exit_status != 0:
                 yield {
                     "type": "step_completed",
@@ -254,8 +255,8 @@ class DockerDeploymentPipeline:
             compose_text = str(payload["docker_compose_yml"])
             dockerfile_text = str(payload["dockerfile"])
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            compose_text = self._fallback_compose(context)
-            dockerfile_text = self._fallback_dockerfile()
+            compose_text = fallback_compose(context)
+            dockerfile_text = fallback_dockerfile()
 
         return {
             "docker-compose.yml": compose_text,
@@ -284,7 +285,7 @@ class DockerDeploymentPipeline:
             payload = json.loads(content)
             dockerfile_text = str(payload["dockerfile"])
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            dockerfile_text = self._fallback_dockerfile()
+            dockerfile_text = fallback_dockerfile()
 
         return {"Dockerfile": dockerfile_text}
 
@@ -312,52 +313,13 @@ class DockerDeploymentPipeline:
             dockerfile_text = str(payload["dockerfile"])
             nginx_conf_text = str(payload["nginx_conf"])
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            dockerfile_text = self._fallback_static_dockerfile()
-            nginx_conf_text = self._fallback_nginx_conf()
+            dockerfile_text = fallback_static_dockerfile()
+            nginx_conf_text = fallback_nginx_conf()
 
         return {
             "Dockerfile": dockerfile_text,
             "nginx.conf": nginx_conf_text,
         }
-
-    def _execution_actions(self, context: DeploymentContext) -> list[tuple[str, dict]]:
-        if context.deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
-            return [
-                (
-                    "compose_config",
-                    {
-                        "action": "compose_config",
-                        "project_path": context.project_path,
-                    },
-                ),
-                (
-                    "compose_up",
-                    {
-                        "action": "compose_up",
-                        "project_path": context.project_path,
-                    },
-                ),
-            ]
-
-        return [
-            (
-                "build_image",
-                {
-                    "action": "build_image",
-                    "image_name": context.app_name,
-                    "dockerfile_path": context.project_path,
-                },
-            ),
-            (
-                "run_container",
-                {
-                    "action": "run_container",
-                    "image_name": context.app_name,
-                    "container_name": context.app_name,
-                    "port_mapping": f"{context.exposed_port}:{self._container_port(context)}",
-                },
-            ),
-        ]
 
     def _run_verification(self, context: DeploymentContext) -> str:
         if context.deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
@@ -390,12 +352,7 @@ class DockerDeploymentPipeline:
         return self._render_verification_summary(context, outputs)
 
     def _is_static_site_project(self, context: DeploymentContext) -> bool:
-        latest_builder_output = context.session_state.get("latest_builder_output", {})
-        if latest_builder_output.get("project_path") == context.project_path:
-            return True
-
-        lowered = context.user_message.lower()
-        if any(term in lowered for term in ("website", "landing page", "portfolio", "static site", "html css js")):
+        if is_static_site_request(context):
             return True
 
         index_exists = self._check_file_exists(context, "index.html")
@@ -414,12 +371,6 @@ class DockerDeploymentPipeline:
             },
         )
         return tool_event.exit_status == 0
-
-    @staticmethod
-    def _container_port(context: DeploymentContext) -> int:
-        if "nginx.conf" in context.generated_files:
-            return 80
-        return int(context.exposed_port or 80)
 
     def _render_cancel_message(self, context: DeploymentContext) -> str:
         return self._generate_text(
@@ -521,26 +472,6 @@ class DockerDeploymentPipeline:
             ),
         )
 
-    @staticmethod
-    def _tool_called_event(action: str, command: str) -> dict:
-        return {
-            "type": "tool_called",
-            "tool_name": "docker_action",
-            "action": action,
-            "command": command,
-        }
-
-    @staticmethod
-    def _tool_event(tool_event) -> dict:
-        return {
-            "type": "tool_event",
-            "tool_name": tool_event.tool_name,
-            "command": tool_event.command,
-            "exit_status": tool_event.exit_status,
-            "stdout": tool_event.stdout,
-            "stderr": tool_event.stderr,
-        }
-
     def _detect_turn_intent(self, context: DeploymentContext) -> str:
         pending = context.state.to_dict() if context.state.has_pending_approval else {}
         if not pending:
@@ -572,18 +503,7 @@ class DockerDeploymentPipeline:
             context=context,
             extra={"deployment_state": pending},
         )
-        normalized: dict[str, object] = {}
-        project_path = payload.get("project_path")
-        if isinstance(project_path, str) and project_path.strip():
-            normalized["project_path"] = project_path.strip().rstrip(".,")
-        app_name = payload.get("app_name")
-        if isinstance(app_name, str) and app_name.strip():
-            normalized["app_name"] = app_name.strip().lower().replace(" ", "-")
-        exposed_port = payload.get("exposed_port")
-        if isinstance(exposed_port, int):
-            normalized["exposed_port"] = exposed_port
-        elif isinstance(exposed_port, str) and exposed_port.isdigit():
-            normalized["exposed_port"] = int(exposed_port)
+        normalized = normalize_request_details(payload)
         return normalized
 
     def _generate_json(self, instruction: str, context: DeploymentContext, extra: dict | None = None) -> dict:
@@ -644,52 +564,3 @@ class DockerDeploymentPipeline:
         response = self._model_client.chat(messages=messages, tools=[])
         content = (response.get("message", {}).get("content", "") or "").strip()
         return content or fallback
-
-
-
-
-    @staticmethod
-    def _fallback_compose(context: DeploymentContext) -> str:
-        return (
-            "services:\n"
-            f"  {context.app_name}:\n"
-            "    build:\n"
-            "      context: .\n"
-            "      dockerfile: Dockerfile\n"
-            "    restart: unless-stopped\n"
-            f"    ports:\n      - \"{context.exposed_port}:{context.exposed_port}\"\n"
-        )
-
-    @staticmethod
-    def _fallback_dockerfile() -> str:
-        return (
-            "FROM python:3.13-slim\n"
-            "WORKDIR /app\n"
-            "COPY . /app\n"
-            "RUN pip install --no-cache-dir -r requirements.txt\n"
-            "CMD [\"python\", \"-m\", \"http.server\", \"8000\"]\n"
-        )
-
-    @staticmethod
-    def _fallback_static_dockerfile() -> str:
-        return (
-            "FROM nginx:1.27-alpine\n"
-            "COPY nginx.conf /etc/nginx/conf.d/default.conf\n"
-            "COPY . /usr/share/nginx/html\n"
-            "EXPOSE 80\n"
-            'CMD ["nginx", "-g", "daemon off;"]\n'
-        )
-
-    @staticmethod
-    def _fallback_nginx_conf() -> str:
-        return (
-            "server {\n"
-            "    listen 80;\n"
-            "    server_name _;\n"
-            "    root /usr/share/nginx/html;\n"
-            "    index index.html;\n\n"
-            "    location / {\n"
-            "        try_files $uri $uri/ /index.html;\n"
-            "    }\n"
-            "}\n"
-        )
