@@ -1,18 +1,13 @@
-import json
 from collections.abc import Iterator
 
 from src.deployments.docker_pipeline import DockerDeploymentPipeline
-from src.deployments.models import (
-    DEPLOYMENT_TYPE_DOCKER_COMPOSE,
-    DEPLOYMENT_TYPE_DOCKER_SINGLE,
-    DeploymentContext,
-    DeploymentState,
-)
+from src.deployments.models import DeploymentContext, DeploymentState
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import SkillContext
 from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
-from src.deployments.utils import chunk_text, directory_discovery_command, parse_directories, safe_json
+from src.deployments.preparation import (apply_preparation_details, extract_root_path, extract_preparation_details, needs_port, needs_preparation_prompt, needs_project_selection, render_discovery_failure, render_discovery_result, render_port_prompt, render_preparation_question, render_project_selection_prompt, resolve_directory_selection, select_deployment_type, should_inspect_directories, stream_message)
+from src.deployments.utils import chunk_text, directory_discovery_command, parse_directories
 
 
 class DeploymentEngine:
@@ -30,7 +25,7 @@ class DeploymentEngine:
         self._ssh_tool = ssh_tool
 
     def stream(self, context: SkillContext) -> Iterator[dict]:
-        deployment_type = self._select_deployment_type(context)
+        deployment_type = select_deployment_type(self._model_client, context)
         state = DeploymentState.from_session(context.session_state) or DeploymentState()
         if not state.deployment_type:
             state.deployment_type = deployment_type
@@ -43,43 +38,36 @@ class DeploymentEngine:
             session_state=context.session_state,
             state=state,
         )
-        extracted = self._extract_preparation_details(deployment_context)
-        self._apply_preparation_details(deployment_context, extracted)
+        extracted = extract_preparation_details(self._model_client, deployment_context)
+        apply_preparation_details(deployment_context, extracted)
 
-        if self._should_inspect_directories(deployment_context, extracted):
+        if should_inspect_directories(deployment_context.state, extracted):
             yield from self._inspect_directories(deployment_context)
             return
 
-        selected_path = self._resolve_directory_selection(deployment_context, extracted)
+        selected_path = resolve_directory_selection(deployment_context, extracted)
         if selected_path:
             deployment_context.project_path = selected_path
 
         deployment_context.save_state()
 
-        if self._needs_preparation_prompt(deployment_context):
-            yield from self._ask_preparation_question(deployment_context)
+        if needs_preparation_prompt(deployment_context):
+            yield from stream_message(render_preparation_question(self._model_client, deployment_context))
             return
 
-        if self._needs_project_selection(deployment_context):
-            yield from self._prompt_for_project_selection(deployment_context)
+        if needs_project_selection(deployment_context):
+            yield from stream_message(render_project_selection_prompt(self._model_client, deployment_context, deployment_context.state.get("suggested_directories", [])))
             return
 
-        if self._needs_port(deployment_context):
-            yield from self._prompt_for_port(deployment_context)
+        if needs_port(deployment_context):
+            yield from stream_message(render_port_prompt(self._model_client, deployment_context, deployment_context.project_path or "that project"))
             return
 
         yield from self._docker_pipeline.stream(deployment_context)
 
 
-    def _should_inspect_directories(self, context: DeploymentContext, extracted: dict) -> bool:
-        state = context.state
-        intent = str(extracted.get("prep_intent", "")).strip().lower()
-        return intent == "inspect_directories" or (
-            state.get("awaiting_directory_selection") and intent == "continue_directory_help"
-        )
-
     def _inspect_directories(self, context: DeploymentContext) -> Iterator[dict]:
-        root_path = self._extract_root_path(context.user_message) or context.state.get("root_path") or "~/shellmate-sites"
+        root_path = extract_root_path(context.user_message) or context.state.get("root_path") or "~/shellmate-sites"
         context.state["root_path"] = root_path
 
         yield {
@@ -114,7 +102,7 @@ class DeploymentEngine:
                 "detail": "Directory inspection failed.",
             }
             for token in chunk_text(
-                self._render_discovery_failure(context, root_path, tool_output)
+                render_discovery_failure(self._model_client, context, root_path, tool_output)
             ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
@@ -131,280 +119,7 @@ class DeploymentEngine:
             "detail": "Directory inspection completed.",
         }
 
-        message = self._render_discovery_result(context, root_path, directories)
+        message = render_discovery_result(self._model_client, context, root_path, directories)
         for token in chunk_text(message):
             yield {"type": "token", "content": token}
         yield {"type": "done"}
-
-    def _resolve_directory_selection(self, context: DeploymentContext, extracted: dict) -> str | None:
-        explicit_path = extracted.get("project_path")
-        if isinstance(explicit_path, str) and explicit_path.strip():
-            resolved = explicit_path.strip().rstrip(".,")
-            context.state["awaiting_directory_selection"] = False
-            context.state["project_path"] = resolved
-            if extracted.get("app_name"):
-                context.state["app_name"] = str(extracted["app_name"]).strip().lower().replace("_", "-")
-            return resolved
-
-        directories = context.state.get("suggested_directories", [])
-        selected_name = str(extracted.get("selected_directory_name", "")).strip().lower()
-        for directory in directories:
-            basename = directory.rstrip("/").split("/")[-1].lower()
-            if basename and selected_name and basename == selected_name:
-                context.state["awaiting_directory_selection"] = False
-                context.state["project_path"] = directory
-                context.state["app_name"] = basename.replace("_", "-")
-                return directory
-
-        return None
-
-    def _needs_preparation_prompt(self, context: DeploymentContext) -> bool:
-        lowered = context.user_message.lower()
-        no_known_path = not context.project_path
-        return no_known_path and any(term in lowered for term in ("deploy", "deployment", "docker", "publish", "ship"))
-
-    def _ask_preparation_question(self, context: DeploymentContext) -> Iterator[dict]:
-        context.state["awaiting_directory_discovery_consent"] = True
-        context.save_state()
-        message = self._render_preparation_question(context)
-        for token in chunk_text(message):
-            yield {"type": "token", "content": token}
-        yield {"type": "done"}
-
-    def _needs_project_selection(self, context: DeploymentContext) -> bool:
-        return bool(context.state.get("awaiting_directory_selection")) and not context.project_path
-
-    def _prompt_for_project_selection(self, context: DeploymentContext) -> Iterator[dict]:
-        directories = context.state.get("suggested_directories", [])
-        message = self._render_project_selection_prompt(context, directories)
-        for token in chunk_text(message):
-            yield {"type": "token", "content": token}
-        yield {"type": "done"}
-
-    def _needs_port(self, context: DeploymentContext) -> bool:
-        return context.project_path is not None and context.exposed_port is None
-
-    def _prompt_for_port(self, context: DeploymentContext) -> Iterator[dict]:
-        context.save_state()
-        app_target = context.project_path or "that project"
-        message = self._render_port_prompt(context, app_target)
-        for token in chunk_text(message):
-            yield {"type": "token", "content": token}
-        yield {"type": "done"}
-
-    def _select_deployment_type(self, context: SkillContext) -> str:
-        state = DeploymentState.from_session(context.session_state)
-        if state and state.deployment_type:
-            return str(state.deployment_type)
-
-        payload = self._generate_json_from_skill_context(
-            instruction=(
-                "Choose the deployment type for this request. "
-                "Return JSON only with key deployment_type. "
-                "Valid values: docker_single_app, docker_compose_app. "
-                "Use docker_compose_app for multi-service, compose, MERN, or LAMP style deployments. "
-                "Otherwise use docker_single_app."
-            ),
-            context=context,
-        )
-        deployment_type = str(payload.get("deployment_type", DEPLOYMENT_TYPE_DOCKER_SINGLE)).strip()
-        if deployment_type in {DEPLOYMENT_TYPE_DOCKER_COMPOSE, DEPLOYMENT_TYPE_DOCKER_SINGLE}:
-            return deployment_type
-        return DEPLOYMENT_TYPE_DOCKER_SINGLE
-
-    def _extract_preparation_details(self, context: DeploymentContext) -> dict:
-        payload = self._generate_json(
-            instruction=(
-                "Extract deployment preparation details from the full conversation context. "
-                "Return JSON only with keys: prep_intent, project_path, app_name, exposed_port, root_path, selected_directory_name. "
-                "Valid prep_intent values: inspect_directories, continue_directory_help, provide_details, ask_for_preparation, continue. "
-                "Use null for unknown values. "
-                "Prefer conversation history and existing deployment metadata when they clearly refer to the same task."
-            ),
-            context=context,
-            extra={
-                "deployment_state": context.state.to_dict(),
-            },
-        )
-        normalized: dict[str, object] = {}
-        for key in ("prep_intent", "project_path", "app_name", "root_path", "selected_directory_name"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                normalized[key] = value.strip().rstrip(".,")
-        exposed_port = payload.get("exposed_port")
-        if isinstance(exposed_port, int):
-            normalized["exposed_port"] = exposed_port
-        elif isinstance(exposed_port, str) and exposed_port.isdigit():
-            normalized["exposed_port"] = int(exposed_port)
-        return normalized
-
-    @staticmethod
-    def _apply_preparation_details(context: DeploymentContext, extracted: dict) -> None:
-        if extracted.get("project_path"):
-            context.project_path = str(extracted["project_path"])
-        if extracted.get("app_name"):
-            context.app_name = str(extracted["app_name"]).lower().replace(" ", "-")
-        if extracted.get("exposed_port") is not None:
-            context.exposed_port = int(extracted["exposed_port"])
-        if extracted.get("root_path"):
-            context.state["root_path"] = str(extracted["root_path"])
-
-    def _render_discovery_failure(self, context: DeploymentContext, root_path: str, tool_output: str) -> str:
-        return self._generate_text(
-            instruction=(
-                "The directory discovery step failed. "
-                "Explain that you could not inspect the requested server location, "
-                "mention the root path briefly, and suggest giving the exact project path directly."
-            ),
-            context=context,
-            extra={"root_path": root_path, "tool_output": tool_output},
-            fallback=(
-                "I couldn't inspect that server location yet.\n\n"
-                "If you want, send me the exact project path directly and I can continue from there.\n\n"
-                f"Technical details:\n{tool_output}"
-            ),
-        )
-
-    def _render_discovery_result(self, context: DeploymentContext, root_path: str, directories: list[str]) -> str:
-        return self._generate_text(
-            instruction=(
-                "Summarize the result of directory discovery for deployment preparation. "
-                "If directories were found, present them clearly and ask the user which one to deploy. "
-                "If none were found, say so and ask for the exact path."
-            ),
-            context=context,
-            extra={"root_path": root_path, "directories": directories[:8]},
-            fallback=(
-                f"I checked `{root_path}` and found these likely project directories:\n\n"
-                + "\n".join(f"- `{directory}`" for directory in directories[:8])
-                + "\n\nSend me the directory you want to deploy, and include the public port if you already know it."
-                if directories
-                else f"I checked `{root_path}`, but I didn't find any immediate subdirectories to deploy from.\n\nIf you already know the project path, send it directly and I’ll continue."
-            ),
-        )
-
-    def _render_preparation_question(self, context: DeploymentContext) -> str:
-        return self._generate_text(
-            instruction=(
-                "Ask the user whether you should inspect the server for likely project directories first, "
-                "or whether they want to provide the exact project path directly."
-            ),
-            context=context,
-            extra={"deployment_state": context.state.to_dict()},
-            fallback=(
-                "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\n"
-                "If yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\n"
-                "If you already know the exact project path, send it directly along with the public port."
-            ),
-        )
-
-    def _render_project_selection_prompt(self, context: DeploymentContext, directories: list[str]) -> str:
-        return self._generate_text(
-            instruction=(
-                "Ask the user to choose which directory should be deployed. "
-                "Use the discovered directories when available and keep the prompt natural."
-            ),
-            context=context,
-            extra={"directories": directories[:8]},
-            fallback=(
-                "I still need the project directory before I can prepare the deployment.\n\n"
-                "Send the full path and, if you know it, the public port you want to expose."
-            ),
-        )
-
-    def _render_port_prompt(self, context: DeploymentContext, app_target: str) -> str:
-        return self._generate_text(
-            instruction=(
-                "Ask the user for the public port to expose for the deployment. "
-                "Mention that you already have the project path."
-            ),
-            context=context,
-            extra={"app_target": app_target},
-            fallback=(
-                f"I’ve got the project path for `{app_target}`.\n\n"
-                "Now send me the public port you want to expose, for example `port 3000`."
-            ),
-        )
-
-    def _generate_json(self, instruction: str, context: DeploymentContext, extra: dict | None = None) -> dict:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are ShellMate's deployment preparation assistant.\n"
-                    f"{instruction}\n"
-                    "Return valid JSON only."
-                ),
-            },
-            *context.history[-8:],
-            {"role": "user", "content": context.user_message},
-        ]
-        if extra:
-            messages.append({"role": "system", "content": safe_json(extra)})
-        response = self._model_client.chat(messages=messages, tools=[])
-        content = response.get("message", {}).get("content", "") or "{}"
-        try:
-            payload = __import__("json").loads(content)
-            return payload if isinstance(payload, dict) else {}
-        except (__import__("json").JSONDecodeError, TypeError, ValueError):
-            return {}
-
-    def _generate_json_from_skill_context(self, instruction: str, context: SkillContext) -> dict:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are ShellMate's deployment preparation assistant.\n"
-                    f"{instruction}\n"
-                    "Return valid JSON only."
-                ),
-            },
-            *context.history[-8:],
-            {"role": "user", "content": context.user_message},
-            {
-                "role": "system",
-                "content": json.dumps(
-                    {
-                        "session_state": context.session_state,
-                    },
-                    ensure_ascii=True,
-                ),
-            },
-        ]
-        response = self._model_client.chat(messages=messages, tools=[])
-        content = response.get("message", {}).get("content", "") or "{}"
-        try:
-            payload = json.loads(content)
-            return payload if isinstance(payload, dict) else {}
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return {}
-
-    def _generate_text(self, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are ShellMate's deployment preparation assistant.\n"
-                    f"{instruction}\n"
-                    "Respond naturally, clearly, and briefly. Do not mention internal pipeline mechanics."
-                ),
-            },
-            *context.history[-6:],
-            {"role": "user", "content": context.user_message},
-            {
-                "role": "system",
-                "content": safe_json(
-                    {
-                        "deployment_type": context.deployment_type,
-                        "project_path": context.project_path,
-                        "app_name": context.app_name,
-                        "exposed_port": context.exposed_port,
-                        "deployment_state": context.state.to_dict(),
-                        **(extra or {}),
-                    }
-                ),
-            },
-        ]
-        response = self._model_client.chat(messages=messages, tools=[])
-        content = (response.get("message", {}).get("content", "") or "").strip()
-        return content or fallback
