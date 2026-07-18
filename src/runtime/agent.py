@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 
 from src.memory.context_extractor import ContextExtractor
@@ -5,6 +6,8 @@ from src.runtime.models import AgentEvent, AgentTurnResult, ToolEvent
 from src.skills.base import SkillContext
 from src.skills.registry import SkillRegistry
 from src.skills.router import SkillRouter
+
+logger = logging.getLogger(__name__)
 
 
 class ServerOpsAgent:
@@ -56,6 +59,7 @@ class ServerOpsAgent:
         try:
             route = self._skill_router.route(user_message=user_message, history=history)
         except Exception as exc:
+            logger.exception("Skill routing failed", extra={"session_id": session_id, "server_id": server_id})
             fallback_reply = self._runtime_failure_message(
                 "I ran into a problem while deciding how to handle that request.",
                 exc,
@@ -75,6 +79,7 @@ class ServerOpsAgent:
         try:
             skill = self._skill_registry.get(route.skill_id)
         except Exception as exc:
+            logger.exception("Skill loading failed", extra={"session_id": session_id, "server_id": server_id, "skill_id": route.skill_id})
             fallback_reply = self._runtime_failure_message(
                 "I selected a workflow for the request, but I couldn't load it correctly.",
                 exc,
@@ -106,6 +111,7 @@ class ServerOpsAgent:
                         tool_outputs.append(event.stderr)
                 yield event
         except Exception as exc:
+            logger.exception("Skill execution failed", extra={"session_id": session_id, "server_id": server_id, "skill_id": route.skill_id})
             fallback_reply = self._runtime_failure_message(
                 "I started working on that request, but the execution flow failed unexpectedly.",
                 exc,
@@ -125,7 +131,7 @@ class ServerOpsAgent:
             )
         except Exception:
             # Memory extraction should never break the visible agent turn.
-            pass
+            logger.exception("Memory extraction failed", extra={"session_id": session_id, "server_id": server_id})
 
         self._persist_session(
             session=session,
@@ -144,7 +150,5 @@ class ServerOpsAgent:
 
     @staticmethod
     def _runtime_failure_message(prefix: str, exc: Exception) -> str:
-        detail = str(exc).strip()
-        if detail:
-            return f"{prefix}\n\nDetails: {detail}"
+        """Return a safe user-facing message; the exception is logged by the caller."""
         return prefix

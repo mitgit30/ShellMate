@@ -8,12 +8,25 @@ from src.deployments.models import (
 )
 from src.runtime.ollama_client import OllamaModelClient
 from src.tools.docker_tools import DockerTool
-from src.deployments.docker_helpers import (container_port, execution_actions, fallback_compose, fallback_dockerfile, fallback_nginx_conf, fallback_static_dockerfile, is_static_site_request, normalize_request_details, tool_called_event, tool_event_payload)
+from src.deployments.docker_helpers import (
+    container_port,
+    execution_actions,
+    fallback_compose,
+    fallback_dockerfile,
+    fallback_nginx_conf,
+    fallback_static_dockerfile,
+    is_static_site_request,
+    normalize_request_details,
+    tool_called_event,
+    tool_event_payload,
+)
 from src.deployments.utils import chunk_text, derive_app_name, friendly_deployment_type
 
 
 class DockerDeploymentPipeline:
-    def __init__(self, model_client: OllamaModelClient, docker_tool: DockerTool) -> None:
+    def __init__(
+        self, model_client: OllamaModelClient, docker_tool: DockerTool
+    ) -> None:
         self._model_client = model_client
         self._docker_tool = docker_tool
 
@@ -64,7 +77,9 @@ class DockerDeploymentPipeline:
                 "detail": "Deployment validation blocked.",
             }
 
-            for token in chunk_text(self._render_validation_message(context, validation_errors)):
+            for token in chunk_text(
+                self._render_validation_message(context, validation_errors)
+            ):
                 yield {"type": "token", "content": token}
             yield {"type": "done"}
             return
@@ -77,7 +92,7 @@ class DockerDeploymentPipeline:
 
         missing_inputs: list[str] = []
         if not context.project_path:
-            
+
             missing_inputs.append("project path")
         if not context.exposed_port:
             missing_inputs.append("port to expose")
@@ -109,7 +124,9 @@ class DockerDeploymentPipeline:
         yield {"type": "done"}
 
     def _resume_after_approval(self, context: DeploymentContext) -> Iterator[dict]:
-        pending = context.state.to_dict() if context.state.has_pending_approval else None
+        pending = (
+            context.state.to_dict() if context.state.has_pending_approval else None
+        )
         if not pending:
             for token in chunk_text(self._render_no_pending_approval_message(context)):
                 yield {"type": "token", "content": token}
@@ -135,7 +152,8 @@ class DockerDeploymentPipeline:
                     "action": "write_file",
                     "target_path": f"{context.project_path}/{filename}",
                     "content": content,
-                },)
+                },
+            )
             yield tool_called_event("write_file", tool_event.command)
             yield tool_event_payload(tool_event)
             if tool_event.exit_status != 0:
@@ -144,11 +162,13 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment file upload failed.",
                 }
-                for token in chunk_text(self._render_execution_failure(
-                    context,
-                    "I wasn't able to prepare the deployment files on the server.",
-                    tool_output,
-                )):
+                for token in chunk_text(
+                    self._render_execution_failure(
+                        context,
+                        "I wasn't able to prepare the deployment files on the server.",
+                        tool_output,
+                    )
+                ):
                     yield {"type": "token", "content": token}
                 yield {"type": "done"}
                 return
@@ -167,11 +187,13 @@ class DockerDeploymentPipeline:
                     "step": "deployment_execute",
                     "detail": "Deployment execution failed.",
                 }
-                for token in chunk_text(self._render_execution_failure(
-                    context,
-                    "The deployment started, but one of the Docker steps failed.",
-                    tool_output,
-                )):
+                for token in chunk_text(
+                    self._render_execution_failure(
+                        context,
+                        "The deployment started, but one of the Docker steps failed.",
+                        tool_output,
+                    )
+                ):
                     yield {"type": "token", "content": token}
                 yield {"type": "done"}
                 return
@@ -201,30 +223,61 @@ class DockerDeploymentPipeline:
     def _run_validation(self, context: DeploymentContext) -> list[dict[str, str]]:
         checks: list[tuple[str, dict]] = [
             ("docker", {"action": "check_docker"}),
-            ("project_path", {"action": "check_directory", "target_path": context.project_path}),
+            (
+                "project_path",
+                {"action": "check_directory", "target_path": context.project_path},
+            ),
         ]
 
         if context.deployment_type == DEPLOYMENT_TYPE_DOCKER_COMPOSE:
             checks.append(("compose", {"action": "check_compose"}))
 
         if context.exposed_port:
-            checks.append(("port", {"action": "check_port_free", "port": context.exposed_port}))
+            checks.append(
+                ("port", {"action": "check_port_free", "port": context.exposed_port})
+            )
 
         errors: list[dict[str, str]] = []
         for check_name, arguments in checks:
             if check_name == "project_path" and arguments.get("target_path") is None:
                 continue
-            tool_event, tool_output = self._docker_tool.execute(server_id=context.server_id, arguments=arguments)
+            tool_event, tool_output = self._docker_tool.execute(
+                server_id=context.server_id, arguments=arguments
+            )
 
             if tool_event.exit_status != 0:
                 if check_name == "docker":
-                    errors.append({"check": "docker", "message": "Docker is not installed or not reachable on the server.", "details": tool_output})
+                    errors.append(
+                        {
+                            "check": "docker",
+                            "message": "Docker is not installed or not reachable on the server.",
+                            "details": tool_output,
+                        }
+                    )
                 elif check_name == "compose":
-                    errors.append({"check": "compose", "message": "Docker Compose is not available on the server.", "details": tool_output})
+                    errors.append(
+                        {
+                            "check": "compose",
+                            "message": "Docker Compose is not available on the server.",
+                            "details": tool_output,
+                        }
+                    )
                 elif check_name == "project_path":
-                    errors.append({"check": "project_path", "message": f"Project directory '{context.project_path}' was not found.", "details": tool_output})
+                    errors.append(
+                        {
+                            "check": "project_path",
+                            "message": f"Project directory '{context.project_path}' was not found.",
+                            "details": tool_output,
+                        }
+                    )
                 elif check_name == "port":
-                    errors.append({"check": "port", "message": f"Port {context.exposed_port} is already in use.", "details": tool_output})
+                    errors.append(
+                        {
+                            "check": "port",
+                            "message": f"Port {context.exposed_port} is already in use.",
+                            "details": tool_output,
+                        }
+                    )
 
         return errors
 
@@ -262,7 +315,6 @@ class DockerDeploymentPipeline:
             "docker-compose.yml": compose_text,
             "Dockerfile": dockerfile_text,
         }
-        
 
     def _generate_single_app_files(self, context: DeploymentContext) -> dict[str, str]:
         if self._is_static_site_project(context):
@@ -392,7 +444,9 @@ class DockerDeploymentPipeline:
             fallback="There is no deployment plan waiting for approval right now. Ask me to prepare a deployment first.",
         )
 
-    def _render_validation_message(self, context: DeploymentContext, errors: list[dict[str, str]]) -> str:
+    def _render_validation_message(
+        self, context: DeploymentContext, errors: list[dict[str, str]]
+    ) -> str:
         return self._generate_text(
             instruction=(
                 "You are reporting deployment validation results. "
@@ -409,7 +463,9 @@ class DockerDeploymentPipeline:
             ),
         )
 
-    def _render_missing_inputs_message(self, context: DeploymentContext, missing_inputs: list[str]) -> str:
+    def _render_missing_inputs_message(
+        self, context: DeploymentContext, missing_inputs: list[str]
+    ) -> str:
         return self._generate_text(
             instruction=(
                 "You are asking the user for the missing details needed to continue a deployment. "
@@ -417,10 +473,14 @@ class DockerDeploymentPipeline:
             ),
             context=context,
             extra={"missing_inputs": missing_inputs},
-            fallback="I’m ready to prepare the deployment, but I still need: " + ", ".join(missing_inputs) + ".",
+            fallback="I’m ready to prepare the deployment, but I still need: "
+            + ", ".join(missing_inputs)
+            + ".",
         )
 
-    def _render_execution_failure(self, context: DeploymentContext, summary: str, tool_output: str) -> str:
+    def _render_execution_failure(
+        self, context: DeploymentContext, summary: str, tool_output: str
+    ) -> str:
         return self._generate_text(
             instruction=(
                 "The deployment hit a Docker execution failure. "
@@ -456,7 +516,9 @@ class DockerDeploymentPipeline:
             ),
         )
 
-    def _render_verification_summary(self, context: DeploymentContext, outputs: list[str]) -> str:
+    def _render_verification_summary(
+        self, context: DeploymentContext, outputs: list[str]
+    ) -> str:
         return self._generate_text(
             instruction=(
                 "Summarize the deployment verification results for the user. "
@@ -492,7 +554,9 @@ class DockerDeploymentPipeline:
             return intent
         return "continue"
 
-    def _extract_request_details(self, context: DeploymentContext, pending: dict) -> dict:
+    def _extract_request_details(
+        self, context: DeploymentContext, pending: dict
+    ) -> dict:
         payload = self._generate_json(
             instruction=(
                 "Extract deployment parameters from the full conversation context. "
@@ -506,7 +570,9 @@ class DockerDeploymentPipeline:
         normalized = normalize_request_details(payload)
         return normalized
 
-    def _generate_json(self, instruction: str, context: DeploymentContext, extra: dict | None = None) -> dict:
+    def _generate_json(
+        self, instruction: str, context: DeploymentContext, extra: dict | None = None
+    ) -> dict:
         messages = [
             {
                 "role": "system",
@@ -520,7 +586,9 @@ class DockerDeploymentPipeline:
             {"role": "user", "content": context.user_message},
         ]
         if extra:
-            messages.append({"role": "system", "content": json.dumps(extra, ensure_ascii=True)})
+            messages.append(
+                {"role": "system", "content": json.dumps(extra, ensure_ascii=True)}
+            )
         response = self._model_client.chat(messages=messages, tools=[])
         content = response.get("message", {}).get("content", "") or "{}"
         try:

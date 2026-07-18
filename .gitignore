@@ -15,3 +15,4 @@ backend/data/keys/
 backend/data/*.db
 .env
 memory
+.env.example
