@@ -2,6 +2,7 @@ from collections.abc import Iterator
 import json
 
 from src.memory.memory_manager import MemoryManager
+from src.deployments.utils import safe_json
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
 from src.skills.builder_helpers import (chunk_text, clean_summary, is_capability_request, is_explicit_code_request, is_explicit_generation_request, is_generic_slug, is_vague_builder_request, sanitize_slug)
@@ -247,7 +248,7 @@ class BuilderSkill(BaseSkill):
                 {"role": "system", "content": prompt},
                 *context.history[-6:],
                 {"role": "user", "content": context.user_message},
-                {"role": "system", "content": json.dumps(request_details, ensure_ascii=True)},
+                {"role": "system", "content": safe_json(request_details)},
             ],
             tools=[],
         )
@@ -437,7 +438,7 @@ class BuilderSkill(BaseSkill):
             {"role": "user", "content": context.user_message},
         ]
         if extra:
-            messages.append({"role": "system", "content": json.dumps(extra, ensure_ascii=True)})
+            messages.append({"role": "system", "content": safe_json(extra)})
         response = self._model_client.chat(messages=messages, tools=[])
         content = response.get("message", {}).get("content", "") or "{}"
         try:
@@ -468,7 +469,7 @@ class BuilderSkill(BaseSkill):
             {"role": "user", "content": context.user_message},
         ]
         if extra:
-            messages.append({"role": "system", "content": json.dumps(extra, ensure_ascii=True)})
+            messages.append({"role": "system", "content": safe_json(extra)})
         response = self._model_client.chat(messages=messages, tools=[])
         content = (response.get("message", {}).get("content", "") or "").strip()
         return content or fallback

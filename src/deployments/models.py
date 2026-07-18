@@ -102,6 +102,12 @@ class DeploymentState:
     def __getitem__(self, key: str) -> Any:
         return getattr(self, key)
 
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Keep legacy mapping-style state updates compatible with the dataclass."""
+        if not hasattr(self, key):
+            raise KeyError(key)
+        setattr(self, key, value)
+
 
 @dataclass
 class DeploymentContext:

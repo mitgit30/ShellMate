@@ -37,7 +37,11 @@ class AgentEvent(BaseModel):
 
     def as_payload(self) -> dict[str, Any]:
         """Return the transport-safe JSON payload for this event."""
-        return self.model_dump(exclude_none=True, exclude_unset=True)
+        return self.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude_unset=True,
+        )
 
 
 class ToolEvent(BaseModel):
