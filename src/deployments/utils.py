@@ -5,7 +5,13 @@ from collections.abc import Iterator
 
 
 def safe_json(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=True)
+    return json.dumps(payload, ensure_ascii=True, default=_json_default)
+
+
+def _json_default(value: object) -> object:
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable.")
 
 
 def chunk_text(text: str) -> Iterator[str]:
