@@ -20,7 +20,7 @@ from src.deployments.docker_helpers import (
     tool_called_event,
     tool_event_payload,
 )
-from src.deployments.utils import chunk_text, derive_app_name, friendly_deployment_type
+from src.deployments.utils import chunk_text, derive_app_name, friendly_deployment_type, safe_json
 
 
 class DockerDeploymentPipeline:
@@ -587,7 +587,7 @@ class DockerDeploymentPipeline:
         ]
         if extra:
             messages.append(
-                {"role": "system", "content": json.dumps(extra, ensure_ascii=True)}
+                {"role": "system", "content": safe_json(extra)}
             )
         response = self._model_client.chat(messages=messages, tools=[])
         content = response.get("message", {}).get("content", "") or "{}"
@@ -617,7 +617,7 @@ class DockerDeploymentPipeline:
             {"role": "user", "content": context.user_message},
             {
                 "role": "system",
-                "content": json.dumps(
+                "content": safe_json(
                     {
                         "deployment_type": context.deployment_type,
                         "project_path": context.project_path,
@@ -625,7 +625,6 @@ class DockerDeploymentPipeline:
                         "exposed_port": context.exposed_port,
                         **(extra or {}),
                     },
-                    ensure_ascii=True,
                 ),
             },
         ]

@@ -5,14 +5,20 @@ from collections.abc import Iterator
 
 
 def safe_json(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=True, default=_json_default)
+    return json.dumps(_json_ready(payload), ensure_ascii=True)
 
-
-def _json_default(value: object) -> object:
+def _json_ready(value: object, path: str = "$") -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item, f"{path}.{key}") for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item, f"{path}[{index}]") for index, item in enumerate(value)]
     if hasattr(value, "to_dict"):
-        return value.to_dict()
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable.")
-
+        return _json_ready(value.to_dict(), path)
+    if isinstance(value, property):
+        raise TypeError(f"Property descriptor found at {path}; deployment state contains an invalid field.")
+    raise TypeError(f"Object of type {type(value).__name__} at {path} is not JSON serializable.")
 
 def chunk_text(text: str) -> Iterator[str]:
     words = text.split(" ")
