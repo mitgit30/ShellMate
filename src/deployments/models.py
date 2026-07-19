@@ -117,7 +117,7 @@ class DeploymentContext:
     history: list[dict]
     session_state: dict
     state: DeploymentState
-    generated_files: dict[str, str] = field(default_factory=dict)
+
 
     @property
     def deployment_type(self) -> str:
