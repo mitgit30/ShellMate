@@ -15,8 +15,7 @@ def test_deployment_context_serialization_safety() -> None:
         session_state={},
         state=state,
     )
-    
-    # Verify that state.generated_files is initialized to a dict, not a property object
+
     assert isinstance(state.generated_files, dict)
     assert isinstance(ctx.generated_files, dict)
     

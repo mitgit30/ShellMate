@@ -16,3 +16,4 @@ backend/data/*.db
 .env
 memory
 .env.example
+architecture_guide.md
