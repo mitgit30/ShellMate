@@ -27,18 +27,9 @@ class BaseSkill(ABC):
         return f"{self.id}: {self.description}"
 
     def _memory_prompt_block(self, context: SkillContext) -> str:
-        handoff = self._memory_manager.read_handoff(context.server_id)
-        server_facts = self._memory_manager.read_server_facts(context.server_id)
-        session = self._memory_manager.read_session(context.server_id)
+        from src.runtime.prompt_composer import PromptComposer
+        return PromptComposer.build_memory_block(context.server_id, self._memory_manager)
 
-        blocks: list[str] = []
-        if handoff:
-            blocks.append(f"--- HANDOFF FROM PREVIOUS SKILL ---\n{handoff}")
-        if server_facts:
-            blocks.append(f"--- KNOWN SERVER FACTS ---\n{server_facts}")
-        if session:
-            blocks.append(f"--- CURRENT SESSION CONTEXT ---\n{session}")
-        return "\n\n".join(blocks)
 
     @abstractmethod
     def execute(self, context: SkillContext) -> Iterator[Mapping[str, Any]]:
