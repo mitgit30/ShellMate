@@ -287,7 +287,7 @@ class DockerDeploymentPipeline:
         return self._generate_single_app_files(context)
 
     def _generate_compose_files(self, context: DeploymentContext) -> dict[str, str]:
-        prompt = (
+        domain_instruction = (
             "You generate Docker deployment files for Linux servers.\n"
             "Return JSON only with keys docker_compose_yml and dockerfile.\n"
             "Use the user's request and detected metadata.\n"
@@ -296,7 +296,12 @@ class DockerDeploymentPipeline:
             f"Project path: {context.project_path}\n"
             f"App name: {context.app_name}\n"
             f"Port: {context.exposed_port}\n"
-            f"User request: {context.user_message}\n"
+            f"User request: {context.user_message}"
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=True,
         )
         response = self._model_client.chat(
             messages=[{"role": "system", "content": prompt}],
@@ -320,13 +325,18 @@ class DockerDeploymentPipeline:
         if self._is_static_site_project(context):
             return self._generate_static_site_files(context)
 
-        prompt = (
+        domain_instruction = (
             "You generate a Dockerfile for deploying a single Linux-hosted app.\n"
             "Return JSON only with key dockerfile.\n"
             "Use a concise production-safe default.\n"
             f"App name: {context.app_name}\n"
             f"Port: {context.exposed_port}\n"
-            f"User request: {context.user_message}\n"
+            f"User request: {context.user_message}"
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=True,
         )
         response = self._model_client.chat(
             messages=[{"role": "system", "content": prompt}],
@@ -342,7 +352,7 @@ class DockerDeploymentPipeline:
         return {"Dockerfile": dockerfile_text}
 
     def _generate_static_site_files(self, context: DeploymentContext) -> dict[str, str]:
-        prompt = (
+        domain_instruction = (
             "You generate Docker deployment files for a static website.\n"
             "The project already contains HTML, CSS, and JavaScript files.\n"
             "Return JSON only with keys dockerfile and nginx_conf.\n"
@@ -353,7 +363,12 @@ class DockerDeploymentPipeline:
             f"App name: {context.app_name}\n"
             f"Project path: {context.project_path}\n"
             f"Public port: {context.exposed_port}\n"
-            f"User request: {context.user_message}\n"
+            f"User request: {context.user_message}"
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=True,
         )
         response = self._model_client.chat(
             messages=[{"role": "system", "content": prompt}],
@@ -573,14 +588,16 @@ class DockerDeploymentPipeline:
     def _generate_json(
         self, instruction: str, context: DeploymentContext, extra: dict | None = None
     ) -> dict:
+        domain_instruction = f"You are ShellMate's Docker deployment pipeline assistant.\n{instruction}"
+        from src.runtime.prompt_composer import PromptComposer
+        system_content = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=True,
+        )
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are ShellMate's Docker deployment pipeline assistant.\n"
-                    f"{instruction}\n"
-                    "Return valid JSON only."
-                ),
+                "content": system_content,
             },
             *context.history[-8:],
             {"role": "user", "content": context.user_message},
@@ -604,14 +621,16 @@ class DockerDeploymentPipeline:
         fallback: str,
         extra: dict | None = None,
     ) -> str:
+        domain_instruction = f"You are ShellMate's Docker deployment assistant.\n{instruction}"
+        from src.runtime.prompt_composer import PromptComposer
+        system_content = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=False,
+        )
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are ShellMate's Docker deployment assistant.\n"
-                    f"{instruction}\n"
-                    "Respond naturally, clearly, and briefly. Do not mention internal pipeline mechanics."
-                ),
+                "content": system_content,
             },
             *context.history[-6:],
             {"role": "user", "content": context.user_message},

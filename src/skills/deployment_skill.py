@@ -47,8 +47,7 @@ class DeploymentSkill(BaseSkill):
         yield from self._deployment_engine.stream(context)
 
     def _build_conversational_reply(self, context: SkillContext) -> str:
-        memory_block = self._memory_prompt_block(context)
-        system_prompt = (
+        domain_instruction = (
             "You are ShellMate's deployment assistant.\n"
             "The user is asking about deployments in a conversational way, not asking you to start a rollout yet.\n"
             "Respond in a warm, clear, user-friendly style.\n"
@@ -57,7 +56,13 @@ class DeploymentSkill(BaseSkill):
             "If the user is asking how deployment would work, explain the flow simply.\n"
             "If the user is asking about installing Docker, explain the safe next step and mention that you can help check the server first.\n"
             "Keep the answer concise, practical, and non-technical unless the user asks for more detail."
-            + (f"\n\n{memory_block}" if memory_block else "")
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        system_prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            server_id=context.server_id,
+            memory_manager=self._memory_manager,
+            require_json=False,
         )
         response = self._model_client.chat(
             messages=[

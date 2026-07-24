@@ -214,8 +214,7 @@ class BuilderSkill(BaseSkill):
         )
 
     def _generate_site(self, context: SkillContext, request_details: dict[str, object]) -> dict[str, str]:
-        memory_block = self._memory_prompt_block(context)
-        prompt = (
+        domain_instruction = (
             "You are the Builder engine inside ShellMate — a product that turns natural language into beautiful, shippable static websites.\n"
             "Your output is a JSON object with exactly these keys: summary, site_slug, index_html, styles_css, script_js.\n"
             "\n"
@@ -236,12 +235,17 @@ class BuilderSkill(BaseSkill):
             "## Output rules\n"
             "- site_slug: short, lowercase, hyphenated. Derived from the actual concept or brand — never 'site', 'draft', 'website', 'generated-website', or 'shellmate-site'.\n"
             "- summary: 1–3 sentences. Describe what was built in plain, friendly language. Write it like a product handoff note to the user — not a prompt echo, not a feature list, not implementation detail.\n"
-            "- Return raw JSON only. No markdown fences, no preamble, no commentary outside the JSON.\n"
             "\n"
             "## Quality bar\n"
             "The final result should feel like something a designer and a developer shipped together — not like AI filler.\n"
-            "If the request is vague, infer the strongest possible creative direction and build that. Do not default to safe.\n"
-            + (f"\n\n{memory_block}" if memory_block else "")
+            "If the request is vague, infer the strongest possible creative direction and build that. Do not default to safe."
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            server_id=context.server_id,
+            memory_manager=self._memory_manager,
+            require_json=True,
         )
         response = self._model_client.chat(
             messages=[
@@ -423,16 +427,18 @@ class BuilderSkill(BaseSkill):
         )
 
     def _generate_json(self, instruction: str, context: SkillContext, extra: dict | None = None) -> dict:
-        memory_block = self._memory_prompt_block(context)
+        domain_instruction = f"You are ShellMate's Builder assistant.\n{instruction}"
+        from src.runtime.prompt_composer import PromptComposer
+        system_content = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            server_id=context.server_id,
+            memory_manager=self._memory_manager,
+            require_json=True,
+        )
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are ShellMate's Builder assistant.\n"
-                    f"{instruction}\n"
-                    "Return valid JSON only."
-                    + (f"\n\n{memory_block}" if memory_block else "")
-                ),
+                "content": system_content,
             },
             *context.history[-8:],
             {"role": "user", "content": context.user_message},
@@ -454,16 +460,18 @@ class BuilderSkill(BaseSkill):
         fallback: str,
         extra: dict | None = None,
     ) -> str:
-        memory_block = self._memory_prompt_block(context)
+        domain_instruction = f"You are ShellMate's Builder assistant.\n{instruction}"
+        from src.runtime.prompt_composer import PromptComposer
+        system_content = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            server_id=context.server_id,
+            memory_manager=self._memory_manager,
+            require_json=False,
+        )
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are ShellMate's Builder assistant.\n"
-                    f"{instruction}\n"
-                    "Respond naturally, clearly, and briefly."
-                    + (f"\n\n{memory_block}" if memory_block else "")
-                ),
+                "content": system_content,
             },
             *context.history[-6:],
             {"role": "user", "content": context.user_message},
