@@ -15,7 +15,7 @@ class SkillRouter:
         if heuristic_route is not None:
             return heuristic_route
 
-        prompt = (
+        domain_instruction = (
             "You are a skill router for a Linux server management agent.\n"
             "Choose the single best skill for the user's intent.\n"
             "Base the decision on what the user is trying to accomplish on the connected Linux server.\n"
@@ -26,7 +26,12 @@ class SkillRouter:
             "Return JSON only with keys: skill_id, reason.\n"
             "The reason must be short, concrete, and focused on the user's actual server task.\n\n"
             "Available skills:\n"
-            f"{self._skill_registry.routing_prompt()}\n"
+            f"{self._skill_registry.routing_prompt()}"
+        )
+        from src.runtime.prompt_composer import PromptComposer
+        prompt = PromptComposer.compose_system_prompt(
+            domain_instruction=domain_instruction,
+            require_json=True,
         )
         messages = [
             {"role": "system", "content": prompt},

@@ -118,8 +118,14 @@ def extract_preparation_details(model_client: OllamaModelClient, context: Deploy
 
 
 def generate_json(model_client: OllamaModelClient, instruction: str, history: list[dict], user_message: str, extra: dict | None = None) -> dict:
+    domain_instruction = f"You are ShellMate's deployment preparation assistant.\n{instruction}"
+    from src.runtime.prompt_composer import PromptComposer
+    system_content = PromptComposer.compose_system_prompt(
+        domain_instruction=domain_instruction,
+        require_json=True,
+    )
     messages = [
-        {"role": "system", "content": f"You are ShellMate's deployment preparation assistant.\n{instruction}\nReturn valid JSON only."},
+        {"role": "system", "content": system_content},
         *history[-8:],
         {"role": "user", "content": user_message},
     ]
@@ -135,8 +141,14 @@ def generate_json(model_client: OllamaModelClient, instruction: str, history: li
 
 
 def generate_text(model_client: OllamaModelClient, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
+    domain_instruction = f"You are ShellMate's deployment preparation assistant.\n{instruction}"
+    from src.runtime.prompt_composer import PromptComposer
+    system_content = PromptComposer.compose_system_prompt(
+        domain_instruction=domain_instruction,
+        require_json=False,
+    )
     messages = [
-        {"role": "system", "content": f"You are ShellMate's deployment preparation assistant.\n{instruction}\nRespond naturally, clearly, and briefly. Do not mention internal pipeline mechanics."},
+        {"role": "system", "content": system_content},
         *context.history[-6:],
         {"role": "user", "content": context.user_message},
         {"role": "system", "content": safe_json({"deployment_type": context.deployment_type, "project_path": context.project_path, "app_name": context.app_name, "exposed_port": context.exposed_port, "deployment_state": context.state.to_dict(), **(extra or {})})},

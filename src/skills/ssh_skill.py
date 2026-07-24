@@ -106,24 +106,29 @@ class SSHSkill(BaseSkill):
             suffix = " " if index < len(words) - 1 else ""
             yield word + suffix
 
+    DOMAIN_INSTRUCTION = (
+        "You are the SSH skill for a Linux server manager. "
+        "This request has already been routed to you. "
+        "Use the SSH tool whenever live server information or action is required. "
+        "Prefer safe, read-focused commands unless the user clearly requests a change. "
+        "After enough tool results are available, answer directly and stop calling tools. "
+        "Only execute install/upgrade/remove commands after the user explicitly approves them. "
+        "Dont install any packages  without explicit user confirmation. "
+        "You can explain the raw data (disk usage,ram usage etc whenever you get it from the server) , just dont dump all raw data to response.. the response should be user friendly. "
+        "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation."
+    )
+
     def _build_messages(self, context: SkillContext) -> list[dict]:
-        memory_block = self._memory_prompt_block(context)
+        from src.runtime.prompt_composer import PromptComposer
+        system_content = PromptComposer.compose_system_prompt(
+            domain_instruction=self.DOMAIN_INSTRUCTION,
+            server_id=context.server_id,
+            memory_manager=self._memory_manager,
+            require_json=False,
+        )
         system_message = {
             "role": "system",
-            "content": (
-                "You are the SSH skill for a Linux server manager. "
-                "This request has already been routed to you. "
-                "Use the SSH tool whenever live server information or action is required. "
-                "Prefer safe, read-focused commands unless the user clearly requests a change. "
-                "After enough tool results are available, answer directly and stop calling tools. "
-                "Only execute install/upgrade/remove commands after the user explicitly approves them."
-                "Dont install any packages  without explicit user confirmation. "
-                "You can explain the raw data (disk usage,ram usage etc whenever you get it from the server) , just dont dump all raw data to response.. the response should be user friendly"
-                "Do not mention routing, skills, tool calls, or internal analysis unless the user explicitly asks for those details. "
-                "Respond like a concise systems assistant focused on the user's outcome."
-                "Never issue a destructive/ change‑making command (e.g., package installs, service restarts) without first asking the user for explicit confirmation."
-                + (f"\n\n{memory_block}" if memory_block else "")
-            ),
+            "content": system_content,
         }
         return [
             system_message,
