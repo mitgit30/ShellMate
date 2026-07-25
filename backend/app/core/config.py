@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))
     server_database_path: Path = Field(default=Path("backend/data/servers.db"))
     memory_database_path: Path = Field(default=Path("backend/data/memory.db"))
+    log_directory: Path = Field(default=Path("logs"))
+    log_level: str = Field(default="INFO")
+    log_file_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -13,10 +13,14 @@ from backend.app.core.config import get_settings
 from backend.app.core.error_handling import log_exception, public_error_message, status_code_for_exception
 from backend.app.core.logging_config import configure_logging
 
-configure_logging()
-logger = logging.getLogger(__name__)
-
 settings = get_settings()
+
+configure_logging(
+    log_directory=settings.log_directory,
+    level=settings.log_level,
+    enable_file_logging=settings.log_file_enabled,
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.api_title, version=settings.api_version)
 
@@ -39,5 +43,3 @@ app.include_router(keys_router, prefix="/api/v1")
 app.include_router(servers_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
-
-
