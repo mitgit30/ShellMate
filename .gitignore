@@ -12,8 +12,10 @@ wheels/
 .pytest_cache/
 .streamlit/
 backend/data/keys/
-backend/data/*.db
+backend/data/
 .env
 memory
+!src/memory/
+!src/memory/*.py
 .env.example
 architecture_guide.md
