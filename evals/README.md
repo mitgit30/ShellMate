@@ -1,8 +1,8 @@
 # ShellMate evaluations
 
-The evaluation suite checks routing and safety boundaries against the cases in
-`golden_cases.json`. The optional Evidently integration creates local HTML and
-JSON reports from the evaluation results.
+The evaluation suite checks routing, safety boundaries, tool contracts, and
+deployment action plans against the cases in `test_cases.json`. The Evidently
+integration creates local HTML and JSON reports from the evaluation results.
 
 Run the evaluation:
 
