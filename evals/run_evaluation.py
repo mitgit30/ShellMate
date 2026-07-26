@@ -20,7 +20,7 @@ class EvaluationSkill:
 
 
 def load_cases() -> list[dict]:
-    path = Path(__file__).with_name("golden_cases.json")
+    path = Path(__file__).with_name("test_cases.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -62,7 +62,48 @@ def run() -> int:
         print(f"[{status}] {result['id']}: expected={result['expected']} actual={result['actual']}")
 
     print(f"\nEvaluation score: {passed}/{len(results)} ({passed / len(results):.0%})")
+    _write_evidently_report(results)
     return 0 if passed == len(results) else 1
+
+
+def _write_evidently_report(results: list[dict]) -> None:
+    """Write a local Evidently report when the evaluation dependency is installed."""
+    try:
+        import pandas as pd
+        from evidently import DataDefinition, Dataset, Report
+        from evidently.presets import DataSummaryPreset
+        from evidently.ui.workspace import Workspace
+    except ImportError:
+        print("Evidently is not installed; skipping the local report.")
+        return
+
+    report_directory = Path(__file__).with_name("reports")
+    report_directory.mkdir(parents=True, exist_ok=True)
+    dataframe = pd.DataFrame(results)
+    # Routing cases use skill IDs while safety cases use booleans. Evidently's
+    # local workspace stores datasets as Parquet, which requires one consistent
+    # type per column.
+    for column in ("expected", "actual"):
+        dataframe[column] = dataframe[column].fillna("").astype(str)
+    dataframe["passed"] = dataframe["passed"].astype(bool)
+    dataset = Dataset.from_pandas(
+        dataframe,
+        data_definition=DataDefinition(),
+    )
+    snapshot = Report([DataSummaryPreset()]).run(dataset, None)
+    snapshot.save_html(str(report_directory / "latest.html"))
+    snapshot.save_json(str(report_directory / "latest.json"))
+    print(f"Evidently report written to {report_directory / 'latest.html'}")
+
+    workspace_directory = Path(__file__).with_name("evidently_workspace")
+    workspace = Workspace.create(str(workspace_directory))
+    projects = workspace.search_project("ShellMate Agent Evaluation")
+    project = projects[0] if projects else workspace.create_project(
+        "ShellMate Agent Evaluation",
+        description="Local evaluation results for ShellMate routing and safety behavior.",
+    )
+    workspace.add_run(project.id, snapshot, include_data=True)
+    print(f"Evidently workspace updated at {workspace_directory}")
 
 
 if __name__ == "__main__":

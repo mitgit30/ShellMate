@@ -17,6 +17,8 @@ backend/data/
 memory
 logs/*.log
 logs/*.log.*
+evals/reports/
+evals/evidently_workspace/
 !src/memory/
 !src/memory/*.py
 .env.example
