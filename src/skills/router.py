@@ -58,16 +58,19 @@ class SkillRouter:
     @staticmethod
     def _route_by_heuristic(user_message: str, history: list[dict]) -> SkillRouteDecision | None:
         lowered = user_message.lower()
-        if SkillRouter._is_builder_request(lowered):
-            return SkillRouteDecision(
-                skill_id="builder",
-                reason="Heuristic routing selected the website builder skill.",
-            )
-
+        # Deployment intent must win over website terminology. Requests such as
+        # "deploy this landing page" mention a builder artifact, but the user is
+        # asking for a rollout and must enter the approval-based Docker pipeline.
         if SkillRouter._is_deployment_request(lowered):
             return SkillRouteDecision(
                 skill_id="deployment",
                 reason="Heuristic routing selected the structured deployment engine.",
+            )
+
+        if SkillRouter._is_builder_request(lowered):
+            return SkillRouteDecision(
+                skill_id="builder",
+                reason="Heuristic routing selected the website builder skill.",
             )
 
         approval_keywords = ("approve", "yes proceed", "yes deploy", "confirm")
