@@ -202,7 +202,8 @@ def generate_server_id(host: str) -> str:
     return f"srv-{sanitized_host}"
 
 
-def render_server_registry() -> bool:
+@st.dialog("Register Server")
+def render_server_registry() -> None:
     username_options = ["ubuntu", "ec2-user", "azureuser", "root", "debian", "Custom"]
 
     with st.form("server-registration-form", clear_on_submit=True):
@@ -236,11 +237,22 @@ def render_server_registry() -> bool:
         try:
             if private_key_file is None:
                 st.error("Upload a .pem file before registering the server.")
-                return False
+                return
+
+            if not host.strip():
+                st.error("Enter the server's public IPv4 address.")
+                return
 
             uploaded_key = upload_private_key(private_key_file)
             resolved_server_id = server_id.strip() or generated_server_id
             resolved_name = name.strip() or resolved_server_id
+            if not resolved_server_id:
+                st.error("Enter a server ID or a valid public IPv4 address.")
+                return
+            if not username.strip():
+                st.error("Enter a username.")
+                return
+
             create_server(
                 server_id=resolved_server_id,
                 name=resolved_name,
@@ -250,23 +262,12 @@ def render_server_registry() -> bool:
                 private_key_path=uploaded_key["private_key_path"],
             )
             st.success("Server registered.")
-            st.session_state.active_view = "registered_servers"
-            return True
+            st.session_state.active_view = "chat"
+            st.rerun()
         except httpx.HTTPStatusError as exc:
             st.error(f"Registration failed: {exc.response.text}")
         except httpx.HTTPError as exc:
             st.error(f"Backend is unreachable: {exc}")
-
-    return False
-
-
-def render_server_table(servers: list[dict]) -> None:
-    st.subheader("Registered Servers")
-    if not servers:
-        st.info("No servers registered yet.")
-        return
-
-    st.dataframe(servers, use_container_width=True)
 
 
 def render_connection_panel(servers: list[dict]) -> None:
@@ -356,9 +357,9 @@ def render_chat_panel() -> None:
     )
 
 
-def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:
-    server_registered = False
+def render_sidebar(servers: list[dict]) -> list[dict]:
     sidebar_servers = servers
+    register_requested = False
 
     with st.sidebar:
         st.header("ShellMate")
@@ -366,17 +367,9 @@ def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:
 
         if st.button("Chat", use_container_width=True):
             st.session_state.active_view = "chat"
-        if st.button("Registered Servers", use_container_width=True):
-            st.session_state.active_view = "registered_servers"
+        register_requested = st.button("Register", use_container_width=True)
 
         st.divider()
-        st.subheader("Register Server")
-        server_registered = render_server_registry()
-        if server_registered:
-            try:
-                sidebar_servers = list_servers()
-            except httpx.HTTPError as exc:
-                st.warning(f"Server saved, but refresh failed: {exc}")
 
         st.divider()
         st.subheader("Connection Access")
@@ -388,14 +381,13 @@ def render_sidebar(servers: list[dict]) -> tuple[bool, list[dict]]:
         else:
             st.warning("Chat is locked until a server connection succeeds.")
 
-    return server_registered, sidebar_servers
+    if register_requested:
+        render_server_registry()
+
+    return sidebar_servers
 
 
 def render_main_content(servers: list[dict]) -> None:
-    if st.session_state.active_view == "registered_servers":
-        render_server_table(servers)
-        return
-
     render_chat_panel()
 
 
@@ -429,7 +421,7 @@ def main() -> None:
         )
         st.warning(f"API connection failed: {exc}")
 
-    _, servers = render_sidebar(servers)
+    servers = render_sidebar(servers)
     render_main_content(servers)
 
 
