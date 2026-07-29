@@ -3,9 +3,7 @@ fastapi
 uvicorn
 pydantic
 pydantic-settings
-httpx
 ollama
-streamlit
 python-multipart
 tracely
 evidently

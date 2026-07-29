@@ -1,0 +1,12 @@
+.env
+.venv
+.git
+__pycache__
+*.py[cod]
+.pytest_cache
+.pytest-tmp*
+logs
+backend/data
+evals/reports
+evals/evidently_workspace
+Dockerfile*
