@@ -22,4 +22,4 @@ evals/evidently_workspace/
 !src/memory/
 !src/memory/*.py
 .env.example
-architecture_guide.md
+
