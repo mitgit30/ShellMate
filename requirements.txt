@@ -6,4 +6,10 @@ pydantic-settings
 httpx
 ollama
 streamlit
-python-multipart # For file uploads in FastAPI
+python-multipart
+tracely
+evidently
+pytest
+langchain-ollama
+langchain-chroma
+chromadb

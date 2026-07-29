@@ -5,13 +5,17 @@ description = "Chat-based Linux server manager with FastAPI, Paramiko, and Strea
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "chromadb>=1.5.9",
     "evidently>=0.7.21",
     "fastapi>=0.136.1",
     "httpx>=0.28.1",
+    "langchain-chroma>=1.1.0",
+    "langchain-ollama>=1.1.0",
     "ollama>=0.5.1",
     "paramiko>=4.0.0",
     "pydantic>=2.13.3",
     "pydantic-settings>=2.11.0",
+    "pytest>=9.0.3",
     "python-multipart>=0.0.20",
     "streamlit>=1.57.0",
     "tracely>=0.2.12",

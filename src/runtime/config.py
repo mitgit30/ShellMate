@@ -8,6 +8,7 @@ class RuntimeSettings(BaseSettings):
     ollama_model: str = Field(default="minimax-m3:doud")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     ollama_api_key: str | None = None
+    ollama_embedding_model: str = Field(default="nomic-embed-text")
     agent_max_turns: int = Field(default=10, ge=1, le=10)
 
     model_config = SettingsConfigDict(

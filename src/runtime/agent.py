@@ -128,6 +128,7 @@ class ServerOpsAgent:
                 user_message=user_message,
                 assistant_message=reply,
                 tool_outputs=tool_outputs,
+                session_id=session_id,
             )
         except Exception:
             # Memory extraction should never break the visible agent turn.

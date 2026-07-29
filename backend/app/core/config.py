@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))
     server_database_path: Path = Field(default=Path("backend/data/servers.db"))
     memory_database_path: Path = Field(default=Path("backend/data/memory.db"))
+    historical_memory_path: Path = Field(default=Path("backend/data/chroma"))
     log_directory: Path = Field(default=Path("logs"))
     log_level: str = Field(default="INFO")
     log_file_enabled: bool = True
