@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 
 from src.memory.memory_manager import MemoryManager
 from src.memory.vector_store import HistoricalMemoryStore
@@ -63,3 +64,18 @@ def test_historical_memory_redacts_secrets() -> None:
 
     assert "secret-value" not in sanitized
     assert "BEGIN PRIVATE KEY" not in sanitized
+
+
+def test_relative_historical_dates_are_resolved() -> None:
+    assert PromptComposer.parse_historical_date_range(
+        "What happened 2 days ago?",
+        today=date(2026, 7, 29),
+    ).label == "2026-07-27"
+    assert PromptComposer.parse_historical_date_range(
+        "What happened yesterday?",
+        today=date(2026, 7, 29),
+    ).label == "2026-07-28"
+
+
+def test_relative_dates_activate_historical_search() -> None:
+    assert PromptComposer._is_historical_query("What work was done 2 days ago?")

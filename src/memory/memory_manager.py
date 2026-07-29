@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,8 @@ class MemoryManager:
         server_id: str,
         query: str,
         limit: int = 3,
+        date_from: date | None = None,
+        date_to: date | None = None,
     ) -> list[str]:
         if self._historical_store is None:
             return []
@@ -119,6 +122,8 @@ class MemoryManager:
                 server_id=server_id,
                 query=query,
                 limit=limit,
+                date_from=date_from,
+                date_to=date_to,
             )
         except Exception:
             # A missing embedding model or unavailable Chroma must not block chat.
