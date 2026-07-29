@@ -1,5 +1,4 @@
 """SQLite-backed server memory facade."""
-
 from __future__ import annotations
 
 import hashlib
@@ -16,11 +15,22 @@ class MemoryManager:
         self,
         database_path: Path | None = None,
         base_dir: Path | None = None,
+        historical_memory_path: Path | None = None,
+        historical_store: Any | None = None,
     ) -> None:
         project_root = Path(__file__).resolve().parents[2]
         if database_path is None:
             database_path = (base_dir / "memory.db") if base_dir else project_root / "backend" / "data" / "memory.db"
         self._store = SQLiteMemoryStore(database_path)
+        self._historical_store = historical_store
+        if self._historical_store is None and historical_memory_path is not None:
+            self._historical_store = self._create_historical_store(historical_memory_path)
+
+    @staticmethod
+    def _create_historical_store(path: Path):
+        from src.memory.vector_store import HistoricalMemoryStore
+
+        return HistoricalMemoryStore(path)
 
     def read_handoff(self, server_id: str) -> str:
         return self._store.get_document(server_id, "handoff")
@@ -41,6 +51,7 @@ class MemoryManager:
                 cleaned = str(line).strip()
                 if not cleaned:
                     continue
+
                 fact_key = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
                 self._store.upsert_fact(
                     server_id=server_id,
@@ -74,6 +85,44 @@ class MemoryManager:
 
     def record_observation(self, server_id: str, source: str, payload: dict[str, Any]) -> None:
         self._store.record_observation(server_id, source, payload)
+
+    def record_historical_memory(
+        self,
+        server_id: str,
+        summary: str,
+        source: str,
+        session_id: str | None = None,
+    ) -> None:
+        if self._historical_store is None:
+            return
+        try:
+            self._historical_store.add_summary(
+                server_id=server_id,
+                summary=summary,
+                source=source,
+                session_id=session_id,
+            )
+        except Exception:
+            # Historical indexing must never break the primary agent turn.
+            return
+
+    def search_historical_memory(
+        self,
+        server_id: str,
+        query: str,
+        limit: int = 3,
+    ) -> list[str]:
+        if self._historical_store is None:
+            return []
+        try:
+            return self._historical_store.search(
+                server_id=server_id,
+                query=query,
+                limit=limit,
+            )
+        except Exception:
+            # A missing embedding model or unavailable Chroma must not block chat.
+            return []
 
     @staticmethod
     def _trim_lines(content: str, limit: int) -> str:
