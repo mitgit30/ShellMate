@@ -25,6 +25,7 @@ class ContextExtractor:
         user_message: str,
         assistant_message: str,
         tool_outputs: list[str],
+        session_id: str | None = None,
     ) -> str:
         extracted = self._run_extraction_turn(
             server_id=server_id,
@@ -44,6 +45,12 @@ class ContextExtractor:
             self._memory_manager.update_server_facts(server_id, parsed.server_facts)
         if parsed.session.strip():
             self._memory_manager.write_session(server_id, parsed.session)
+        self._memory_manager.record_historical_memory(
+            server_id=server_id,
+            summary=parsed.handoff,
+            source="context_extractor",
+            session_id=session_id,
+        )
         return extracted
 
     def _run_extraction_turn(
