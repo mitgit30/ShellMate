@@ -4,6 +4,18 @@ ShellMate is an AI-assisted Linux server operations platform designed to execute
 
 ---
 
+## Technology Stack
+
+* **Frontend**: Streamlit (NDJSON-streamed token visualization)
+* **Backend**: FastAPI, Pydantic, Uvicorn
+* **Agentic Runtime**: Python-native ReAct/Pipeline runtime, Ollama Client
+* **LLM Models**: `minimax-m3:doud` (Reasoning & Action Selection), `nomic-embed-text` (Vector Embeddings)
+* **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
+* **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI
+* **Orchestration Tooling**: LangChain Core / LangChain Chroma
+
+---
+
 ## 1. Operating Pillars
 
 ShellMate separates operations into three distinct pillars to isolate flexible diagnostics from safety-critical mutations:

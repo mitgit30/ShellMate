@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,19 +18,55 @@ class KeyStorageService:
         if not filename.lower().endswith(".pem"):
             raise InvalidKeyUploadError("Only .pem SSH key files are supported.")
 
-        content = await uploaded_file.read()
+        max_size = self._settings.ssh_key_max_size_bytes
+        content = await uploaded_file.read(max_size + 1)
         if not content:
             raise InvalidKeyUploadError("Uploaded .pem file is empty.")
+        if len(content) > max_size:
+            raise InvalidKeyUploadError(
+                f"SSH key file is too large. Maximum size is {max_size // 1024} KB."
+            )
+        if not self._is_private_key(content):
+            raise InvalidKeyUploadError(
+                "The uploaded file does not contain a supported PEM private key."
+            )
 
         storage_dir = self._settings.ssh_key_storage_dir
         storage_dir.mkdir(parents=True, exist_ok=True)
+        self._restrict_permissions(storage_dir, 0o700)
 
-        stored_filename = f"{uuid4().hex}-{Path(filename).name}"
+        # Do not preserve the user-provided filename in storage. It is not needed
+        # for SSH and may expose identifying information in the filesystem.
+        stored_filename = f"{uuid4().hex}.pem"
         stored_path = storage_dir / stored_filename
-        stored_path.write_bytes(content)
+        try:
+            with stored_path.open("xb") as key_file:
+                key_file.write(content)
+                key_file.flush()
+                os.fsync(key_file.fileno())
+            self._restrict_permissions(stored_path, 0o600)
+        except OSError as exc:
+            stored_path.unlink(missing_ok=True)
+            raise InvalidKeyUploadError("The SSH key could not be stored securely.") from exc
 
         return UploadedKeyResponse(
             original_filename=filename,
             stored_filename=stored_filename,
             private_key_path=str(stored_path.resolve()),
         )
+
+    @staticmethod
+    def _is_private_key(content: bytes) -> bool:
+        normalized = content.lstrip()
+        return normalized.startswith(b"-----BEGIN ") and b"PRIVATE KEY-----" in normalized.split(
+            b"\n", 1
+        )[0]
+
+    @staticmethod
+    def _restrict_permissions(path: Path, mode: int) -> None:
+        try:
+            path.chmod(mode)
+        except OSError:
+            # Windows does not expose Unix permission bits. The container/Linux
+            # deployment enforces these permissions; upload must remain portable.
+            pass
