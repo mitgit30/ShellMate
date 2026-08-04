@@ -1,3 +1,5 @@
 streamlit
 httpx
 requests
+pydantic
+pydantic-settings

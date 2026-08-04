@@ -12,12 +12,9 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
 COPY src /app/src
+COPY evals /app/evals
 
-RUN mkdir -p /app/backend/data/keys /app/backend/data/chroma /app/logs \
-    && addgroup --system shellmate \
-    && adduser --system --ingroup shellmate shellmate \
-    && chown -R shellmate:shellmate /app
-USER shellmate
+RUN mkdir -p /app/backend/data/keys /app/backend/data/chroma /app/logs
 
 EXPOSE 8000
 

@@ -1,0 +1,53 @@
+name: shellmate
+services:
+  backend_app:
+    build:
+      context: .
+      dockerfile: backend/app/Dockerfile
+    container_name: backend_app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./logs:/app/logs
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-minimax-m3:doud}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://backend_app:8000/api/v1
+    depends_on:
+      - backend_app
+    networks:
+      - app_network
+
+  evaluation:
+    profiles: ["evaluation"]
+    build:
+      context: .
+      dockerfile: backend/app/Dockerfile
+    command: ["python", "-m", "evals.run_evaluation"]
+    volumes:
+      - ./evals:/app/evals
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-minimax-m3:doud}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
