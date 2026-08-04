@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -7,12 +9,21 @@ class ServerCreate(BaseModel):
     host: str = Field(min_length=7, max_length=15, description="Public IPv4 address")
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1, max_length=100)
-    private_key_path: str = Field(min_length=1, max_length=500)
+    key_id: str | None = Field(default=None, min_length=1, max_length=100)
+    # Accepted temporarily for existing local registrations. New clients must
+    # send key_id; this field is never returned by the public API.
+    private_key_path: str | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def validate_authentication(self) -> "ServerCreate":
-        if not self.private_key_path.lower().endswith(".pem"):
-            raise ValueError("private_key_path must point to a .pem file.")
+        if not self.key_id and not self.private_key_path:
+            raise ValueError("key_id is required.")
+        if self.key_id and (
+            Path(self.key_id).name != self.key_id
+            or "/" in self.key_id
+            or "\\" in self.key_id
+        ):
+            raise ValueError("key_id must be a filename identifier, not a path.")
         octets = self.host.split(".")
         if len(octets) != 4 or any(not octet.isdigit() for octet in octets):
             raise ValueError("host must be a valid IPv4 address.")
@@ -22,8 +33,13 @@ class ServerCreate(BaseModel):
         return self
 
 
-class ServerRecord(ServerCreate):
-    pass
+class ServerRecord(BaseModel):
+    id: str
+    name: str
+    host: str
+    port: int
+    username: str
+    private_key_path: str
 
 
 class ServerResponse(BaseModel):
@@ -32,7 +48,7 @@ class ServerResponse(BaseModel):
     host: str
     port: int
     username: str
-    private_key_path: str
+    key_id: str
 
     @classmethod
     def from_record(cls, record: ServerRecord) -> "ServerResponse":
@@ -42,7 +58,7 @@ class ServerResponse(BaseModel):
             host=record.host,
             port=record.port,
             username=record.username,
-            private_key_path=record.private_key_path,
+            key_id=Path(record.private_key_path).name,
         )
 
 

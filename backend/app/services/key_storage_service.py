@@ -51,9 +51,24 @@ class KeyStorageService:
 
         return UploadedKeyResponse(
             original_filename=filename,
-            stored_filename=stored_filename,
-            private_key_path=str(stored_path.resolve()),
+            key_id=stored_filename,
         )
+
+    def resolve_key_path(self, key_id: str) -> Path:
+        """Resolve an opaque key ID without allowing path traversal."""
+        if not key_id or Path(key_id).name != key_id or "/" in key_id or "\\" in key_id:
+            raise InvalidKeyUploadError("Invalid SSH key identifier.")
+        key_path = self._settings.ssh_key_storage_dir / key_id
+        if not key_path.is_file():
+            raise InvalidKeyUploadError("SSH key was not found.")
+        return key_path.resolve()
+
+    def delete_key(self, key_id: str) -> None:
+        key_path = self.resolve_key_path(key_id)
+        try:
+            key_path.unlink()
+        except OSError as exc:
+            raise InvalidKeyUploadError("SSH key could not be deleted.") from exc
 
     @staticmethod
     def _is_private_key(content: bytes) -> bool:

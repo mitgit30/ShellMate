@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class FrontendSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000/api/v1")
+    shellmate_api_key: str = Field(default="")
     stream_token_delay_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = SettingsConfigDict(
@@ -26,11 +27,19 @@ def get_settings() -> FrontendSettings:
 
 def get_api_client() -> httpx.Client:
     settings = get_settings()
-    return httpx.Client(base_url=settings.api_base_url, timeout=30.0)
+    return httpx.Client(
+        base_url=settings.api_base_url,
+        timeout=30.0,
+        headers={"X-API-Key": settings.shellmate_api_key},
+    )
 
 def get_streaming_api_client() -> httpx.Client:
     settings = get_settings()
-    return httpx.Client(base_url=settings.api_base_url, timeout=None)
+    return httpx.Client(
+        base_url=settings.api_base_url,
+        timeout=None,
+        headers={"X-API-Key": settings.shellmate_api_key},
+    )
 
 
 def initialize_session_state() -> None:
@@ -63,7 +72,7 @@ def create_server(
     host: str,
     port: int,
     username: str,
-    private_key_path: str,
+    key_id: str,
 ) -> dict:
     payload = {
         "id": server_id,
@@ -71,7 +80,7 @@ def create_server(
         "host": host,
         "port": port,
         "username": username,
-        "private_key_path": private_key_path,
+        "key_id": key_id,
     }
     with get_api_client() as client:
         response = client.post("/servers", json=payload)
@@ -259,7 +268,7 @@ def render_server_registry() -> None:
                 host=host.strip(),
                 port=int(port),
                 username=username.strip(),
-                private_key_path=uploaded_key["private_key_path"],
+                key_id=uploaded_key["key_id"],
             )
             st.success("Server registered.")
             st.session_state.active_view = "chat"

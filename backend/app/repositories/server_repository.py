@@ -16,6 +16,9 @@ class ServerRepository(Protocol):
     def add(self, server: ServerRecord) -> None:
         ...
 
+    def update_key(self, server_id: str, private_key_path: str) -> None:
+        ...
+
 
 class InMemoryServerRepository:
     """Prototype repository for registered Linux hosts."""
@@ -31,6 +34,10 @@ class InMemoryServerRepository:
 
     def add(self, server: ServerRecord) -> None:
         self._servers[server.id] = server
+
+    def update_key(self, server_id: str, private_key_path: str) -> None:
+        server = self._servers[server_id]
+        self._servers[server_id] = server.model_copy(update={"private_key_path": private_key_path})
 
 
 class SQLiteServerRepository:
@@ -82,6 +89,14 @@ class SQLiteServerRepository:
                     server.username,
                     server.private_key_path,
                 ),
+            )
+            connection.commit()
+
+    def update_key(self, server_id: str, private_key_path: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE servers SET private_key_path = ? WHERE id = ?",
+                (private_key_path, server_id),
             )
             connection.commit()
 
