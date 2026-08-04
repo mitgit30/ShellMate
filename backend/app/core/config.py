@@ -12,6 +12,8 @@ class Settings(BaseSettings):
         default="http://localhost:8000/api/v1",
         description="Base URL for frontend to reach the backend.",
     )
+    shellmate_api_key: str = Field(default="")
+    cors_allowed_origins: str = Field(default="http://localhost:8501")
     ssh_command_timeout_seconds: int = Field(default=20, ge=1, le=300)
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))
     ssh_key_max_size_bytes: int = Field(default=64 * 1024, ge=1024, le=1024 * 1024)

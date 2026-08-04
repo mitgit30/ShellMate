@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from backend.app.api.dependencies import server_service, ssh_service
 from backend.app.core.exceptions import (
+    InvalidKeyUploadError,
     ServerAlreadyExistsError,
     ServerNotFoundError,
     SSHConnectionError,
@@ -22,6 +23,8 @@ def create_server(payload: ServerCreate) -> ServerResponse:
         return server_service.create_server(payload)
     except ServerAlreadyExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (InvalidKeyUploadError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
@@ -41,3 +44,16 @@ def test_server_connection(server_id: str) -> ServerConnectionTestResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SSHConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.post("/{server_id}/key", response_model=ServerResponse)
+async def rotate_server_key(
+    server_id: str,
+    private_key: UploadFile = File(...),
+) -> ServerResponse:
+    try:
+        return await server_service.rotate_key(server_id, private_key)
+    except ServerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InvalidKeyUploadError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

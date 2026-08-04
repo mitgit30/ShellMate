@@ -19,9 +19,12 @@ from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
 settings = get_settings()
 server_repository = SQLiteServerRepository(settings.server_database_path)
-server_service = ServerService(server_repository=server_repository)
-ssh_service = SSHService(server_service=server_service)
 key_storage_service = KeyStorageService()
+server_service = ServerService(
+    server_repository=server_repository,
+    key_storage_service=key_storage_service,
+)
+ssh_service = SSHService(server_service=server_service)
 session_store = InMemorySessionStore()
 model_client = OllamaModelClient()
 memory_manager = MemoryManager(
