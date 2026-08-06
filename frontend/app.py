@@ -10,7 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class FrontendSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000/api/v1")
-    shellmate_api_key: str = Field(default="")
     stream_token_delay_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = SettingsConfigDict(
@@ -25,12 +24,77 @@ def get_settings() -> FrontendSettings:
     return FrontendSettings()
 
 
+def get_auth_headers() -> dict[str, str]:
+    token = st.session_state.get("access_token")
+    if not token:
+        raise RuntimeError("Authentication is required.")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def authenticate(path: str, email: str, password: str) -> dict:
+    settings = get_settings()
+    response = httpx.post(
+        f"{settings.api_base_url}/auth/{path}",
+        json={"email": email, "password": password},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def logout() -> None:
+    settings = get_settings()
+    token = st.session_state.get("access_token")
+    if token:
+        try:
+            httpx.post(
+                f"{settings.api_base_url}/auth/logout",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+        except httpx.HTTPError:
+            pass
+    st.session_state.pop("access_token", None)
+    st.session_state.pop("user_email", None)
+    st.session_state.connected_server_id = None
+    st.session_state.connected_server_name = None
+
+
+def render_auth_page() -> bool:
+    st.title("ShellMate")
+    st.subheader("Access your servers securely")
+    if "auth_mode" not in st.session_state:
+        st.session_state.auth_mode = "login"
+    left, right = st.columns(2)
+    if left.button("Login", use_container_width=True):
+        st.session_state.auth_mode = "login"
+    if right.button("Create new", use_container_width=True):
+        st.session_state.auth_mode = "register"
+
+    title = "Login" if st.session_state.auth_mode == "login" else "Create account"
+    with st.form("authentication-form"):
+        email = st.text_input("Email", autocomplete="email")
+        password = st.text_input("Password", type="password", autocomplete="new-password")
+        submitted = st.form_submit_button(title, use_container_width=True)
+    if submitted:
+        try:
+            result = authenticate("login" if st.session_state.auth_mode == "login" else "register", email, password)
+            st.session_state.access_token = result["access_token"]
+            st.session_state.user_email = result["email"]
+            st.rerun()
+        except httpx.HTTPStatusError as exc:
+            st.error(exc.response.json().get("detail", "Authentication failed."))
+        except httpx.HTTPError as exc:
+            st.error(f"Backend is unreachable: {exc}")
+    return False
+
+
 def get_api_client() -> httpx.Client:
     settings = get_settings()
     return httpx.Client(
         base_url=settings.api_base_url,
         timeout=30.0,
-        headers={"X-API-Key": settings.shellmate_api_key},
+        headers=get_auth_headers(),
     )
 
 def get_streaming_api_client() -> httpx.Client:
@@ -38,7 +102,7 @@ def get_streaming_api_client() -> httpx.Client:
     return httpx.Client(
         base_url=settings.api_base_url,
         timeout=None,
-        headers={"X-API-Key": settings.shellmate_api_key},
+        headers=get_auth_headers(),
     )
 
 
@@ -373,6 +437,11 @@ def render_sidebar(servers: list[dict]) -> list[dict]:
     with st.sidebar:
         st.header("ShellMate")
         st.caption("Connect a server, explore the environment, deploy safely, and build with chat.")
+        if st.session_state.get("user_email"):
+            st.caption(f"Signed in as {st.session_state.user_email}")
+            if st.button("Logout", use_container_width=True):
+                logout()
+                st.rerun()
 
         if st.button("Chat", use_container_width=True):
             st.session_state.active_view = "chat"
@@ -408,6 +477,10 @@ def main() -> None:
     )
     initialize_session_state()
     load_styles()
+
+    if "access_token" not in st.session_state:
+        render_auth_page()
+        return
 
     st.title("ShellMate")
     st.write(

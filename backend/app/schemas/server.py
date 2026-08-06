@@ -40,6 +40,7 @@ class ServerRecord(BaseModel):
     port: int
     username: str
     private_key_path: str
+    user_id: str | None = None
 
 
 class ServerResponse(BaseModel):
