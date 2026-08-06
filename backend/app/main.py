@@ -8,11 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.v1.routes.chat import router as chat_router
 from backend.app.api.v1.routes.commands import router as commands_router
 from backend.app.api.v1.routes.health import router as health_router
+from backend.app.api.v1.routes.auth import router as auth_router
 from backend.app.api.v1.routes.keys import router as keys_router
 from backend.app.api.v1.routes.servers import router as servers_router
 from backend.app.api.v1.routes.sessions import router as sessions_router
 from backend.app.core.config import get_settings
-from backend.app.core.auth import require_api_key
+from backend.app.core.auth import get_current_user
 from backend.app.core.error_handling import log_exception, public_error_message, status_code_for_exception
 from backend.app.core.logging_config import configure_logging, reset_request_id, set_request_id
 
@@ -26,6 +27,8 @@ configure_logging(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.api_title, version=settings.api_version)
+from backend.app.api.dependencies import user_repository
+app.state.user_repository = user_repository
 
 
 @app.middleware("http")
@@ -72,7 +75,8 @@ app.add_middleware(
 )
 
 app.include_router(health_router, prefix="/api/v1")
-protected_routes = {"dependencies": [Depends(require_api_key)]}
+app.include_router(auth_router, prefix="/api/v1")
+protected_routes = {"dependencies": [Depends(get_current_user)]}
 app.include_router(chat_router, prefix="/api/v1", **protected_routes)
 app.include_router(keys_router, prefix="/api/v1", **protected_routes)
 app.include_router(servers_router, prefix="/api/v1", **protected_routes)

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
         description="Base URL for frontend to reach the backend.",
     )
     shellmate_api_key: str = Field(default="")
+    local_auth_email: str = Field(default="developer@example.com")
+    local_auth_password: str = Field(default="change-me-now", min_length=8)
+    auth_token_lifetime_minutes: int = Field(default=480, ge=5, le=10080)
     cors_allowed_origins: str = Field(default="http://localhost:8501")
     ssh_command_timeout_seconds: int = Field(default=20, ge=1, le=300)
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))

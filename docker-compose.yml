@@ -11,7 +11,7 @@ services:
       - ./backend/data:/app/backend/data
       - ./logs:/app/logs
     environment:
-      SHELLMATE_API_KEY: ${SHELLMATE_API_KEY:?Set SHELLMATE_API_KEY in .env}
+      SHELLMATE_API_KEY: ${SHELLMATE_API_KEY:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8501}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
@@ -28,7 +28,7 @@ services:
     ports:
       - "8501:8501"
     environment:
-      SHELLMATE_API_KEY: ${SHELLMATE_API_KEY:?Set SHELLMATE_API_KEY in .env}
+      SHELLMATE_API_KEY: ${SHELLMATE_API_KEY:-}
       API_BASE_URL: http://backend_app:8000/api/v1
     depends_on:
       - backend_app

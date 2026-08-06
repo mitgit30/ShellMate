@@ -124,9 +124,17 @@ OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your-ollama-cloud-key
 OLLAMA_MODEL=your-chat-model
 OLLAMA_EMBEDDING_MODEL=your-embedding-model
-SHELLMATE_API_KEY=your-shellmate-api-key
+# Optional legacy shared-key compatibility; login is preferred
+SHELLMATE_API_KEY=
 CORS_ALLOWED_ORIGINS=http://localhost:8501
 ```
+
+The application uses one shared SQLite database. Users are stored in `users`, and
+registered servers are scoped with `servers.user_id`; it does not create a separate
+database file per user. Create an account through `POST /api/v1/auth/register` or
+the frontend's **Create new** button. Passwords are stored as scrypt hashes, never
+as plaintext. Existing legacy servers without an owner are assigned to the first
+account created after this migration.
 
 ### 4.3. Starting the Backend (FastAPI)
 The backend manages SSH communication, database operations, and proxy streaming.
