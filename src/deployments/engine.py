@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 
 from src.deployments.docker_pipeline import DockerDeploymentPipeline
@@ -6,6 +7,8 @@ from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import SkillContext
 from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
+
+logger = logging.getLogger(__name__)
 from src.deployments.preparation import (apply_preparation_details, extract_root_path, extract_preparation_details, needs_port, needs_preparation_prompt, needs_project_selection, render_discovery_failure, render_discovery_result, render_port_prompt, render_preparation_question, render_project_selection_prompt, resolve_directory_selection, select_deployment_type, should_inspect_directories, stream_message)
 from src.deployments.utils import chunk_text, directory_discovery_command, parse_directories
 
@@ -25,6 +28,11 @@ class DeploymentEngine:
         self._ssh_tool = ssh_tool
 
     def stream(self, context: SkillContext) -> Iterator[dict]:
+        logger.info(
+            "deployment_started server_id=%s session_id=%s",
+            context.server_id,
+            context.session_id,
+        )
         deployment_type = select_deployment_type(self._model_client, context)
         state = DeploymentState.from_session(context.session_state) or DeploymentState()
         if not state.deployment_type:
@@ -63,6 +71,12 @@ class DeploymentEngine:
             yield from stream_message(render_port_prompt(self._model_client, deployment_context, deployment_context.project_path or "that project"))
             return
 
+        logger.info(
+            "deployment_pipeline_started server_id=%s session_id=%s deployment_type=%s",
+            context.server_id,
+            context.session_id,
+            deployment_context.state.deployment_type or "unknown",
+        )
         yield from self._docker_pipeline.stream(deployment_context)
 
 

@@ -1,4 +1,6 @@
 import logging
+import time
+from uuid import uuid4
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +14,7 @@ from backend.app.api.v1.routes.sessions import router as sessions_router
 from backend.app.core.config import get_settings
 from backend.app.core.auth import require_api_key
 from backend.app.core.error_handling import log_exception, public_error_message, status_code_for_exception
-from backend.app.core.logging_config import configure_logging
+from backend.app.core.logging_config import configure_logging, reset_request_id, set_request_id
 
 settings = get_settings()
 
@@ -24,6 +26,37 @@ configure_logging(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.api_title, version=settings.api_version)
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid4().hex
+    token = set_request_id(request_id)
+    started_at = time.perf_counter()
+    try:
+        logger.info("request_started method=%s path=%s", request.method, request.url.path)
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "request_completed method=%s path=%s status=%s duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+        return response
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception(
+            "request_failed method=%s path=%s duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+        )
+        raise
+    finally:
+        reset_request_id(token)
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

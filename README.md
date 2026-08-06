@@ -90,23 +90,23 @@ ShellMate implements a stateful and semantic memory layer managed by the `Memory
    +-----------------------------+   +-----------------------------+
 ```
 
-### 3.1. Real-Time State: SQLite Memory Store (`sqlite_store.py`)
+### 3.1. Real-Time State: SQLite Memory Store
 Active system parameters are recorded in SQLite (`backend/data/memory.db`) to ensure the agent receives a single, accurate, non-contradictory state:
 * **`memory_documents`**: Stores the latest session state and latest inter-skill handoff description per server. It is not the complete historical summary archive.
 * **`memory_facts`**: Stores categories like `Paths`, `Packages`, `Ports`, and `Containers`. Facts are matched using a hash of the content and saved using an upsert (`ON CONFLICT DO UPDATE`) operation, preventing port conflict hallucinations.
 * **`memory_observations`**: Tracks transaction payloads and observation event history.
 
-### 3.2. Semantic Context: Chroma Vector DB (`vector_store.py`)
+### 3.2. Semantic Context: Chroma Vector DB
 Historical execution summaries are stored semantically to inform the agent of past server actions across sessions:
 * **Vector Store**: Uses Chroma DB through LangChain and the configured Ollama Cloud embedding model.
 * **Indexing**: After a completed turn produces a useful handoff, the summary is sanitized and indexed once. New summaries receive new embeddings; existing summaries are not re-embedded on every request.
-* **Secret Redaction**: Raw agent summaries are parsed by an automated regex-based sanitizer before embedding, redacting SSH private keys (`-----BEGIN PRIVATE KEY-----`) and masking credentials (`password=[REDACTED]`) to prevent vector leakages.
+* **Secret Redaction**: Raw agent summaries are parsed by an automated regex-based sanitizer before embedding, redacting SSH private keys and masking credentials to prevent vector leakages.
 * **Server Scoping**: Vector queries are filtered by metadata attributes (`server_id`, `session_id`, `observed_date`) to guarantee complete process isolation between target nodes.
 
-### 3.3. Prompt Composition & Date-Aware Heuristics (`prompt_composer.py`)
+### 3.3. Prompt Composition & Date-Aware Heuristics
 * The `PromptComposer` automatically scans user requests for historical keywords (*previously, earlier, history, ago, last time*).
 * It decodes relative and absolute temporal queries (e.g., *"yesterday"*, *"3 days ago"*) into calendar dates.
-* Date-bounded queries are semantic-searched against Chroma and injected under `--- RELEVANT HISTORICAL SERVER CONTEXT ---`. If no entries are found, a strict instruction is appended (`Do not invent activity for this date range`) to prevent LLM hallucinations.
+* Date-bounded queries are semantic-searched against Chroma and injected under. If no entries are found, a strict instruction is appended (`Do not invent activity for this date range`) to prevent LLM hallucinations.
 
 ---
 
@@ -169,15 +169,3 @@ Run the optional Evidently evaluation job separately:
 ```bash
 docker compose --profile evaluation run --rm evaluation
 ```
-
-### 4.8. API Authentication and SSH Keys
-All application routes under `/api/v1` require an `X-API-Key` header. The health endpoint is public. The Streamlit frontend reads `SHELLMATE_API_KEY` and sends it automatically.
-
-SSH keys are uploaded once, validated, stored outside the database, and represented publicly using an opaque `key_id`. The actual filesystem path remains internal to the backend. Keys can be deleted when unused and rotated through:
-
-```text
-DELETE /api/v1/keys/{key_id}
-POST   /api/v1/servers/{server_id}/key
-```
-
-See [security_overview.md](security_overview.md) for the full security reference and Mermaid diagrams.

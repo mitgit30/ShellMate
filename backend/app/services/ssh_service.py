@@ -1,4 +1,5 @@
 import socket
+import logging
 from pathlib import Path
 
 import paramiko
@@ -9,6 +10,8 @@ from backend.app.schemas.command import CommandExecutionResponse
 from backend.app.schemas.session import SSHSessionResponse
 from backend.app.services.server_service import ServerService
 
+logger = logging.getLogger(__name__)
+
 
 class SSHService:
     def __init__(self, server_service: ServerService) -> None:
@@ -16,13 +19,18 @@ class SSHService:
         self._settings = get_settings()
 
     def open_session(self, server_id: str) -> SSHSessionResponse:
+        logger.info("ssh_connection_started server_id=%s", server_id)
         server = self._server_service.get_server_record(server_id)
         client = self._build_client()
         try:
             self._connect(client=client, server=server)
+        except SSHConnectionError:
+            logger.exception("ssh_connection_failed server_id=%s", server_id)
+            raise
         finally:
             client.close()
 
+        logger.info("ssh_connection_succeeded server_id=%s", server_id)
         return SSHSessionResponse(
             server_id=server_id,
             connected=True,
@@ -30,6 +38,7 @@ class SSHService:
         )
 
     def execute_command(self, server_id: str, command: str) -> CommandExecutionResponse:
+        logger.info("ssh_command_started server_id=%s", server_id)
         server = self._server_service.get_server_record(server_id)
         client = self._build_client()
 
@@ -42,13 +51,19 @@ class SSHService:
             exit_status = stdout.channel.recv_exit_status()
             stdout_text = stdout.read().decode("utf-8", errors="replace")
             stderr_text = stderr.read().decode("utf-8", errors="replace")
-        except (paramiko.SSHException, OSError, socket.timeout) as exc:
+        except (SSHConnectionError, paramiko.SSHException, OSError, socket.timeout) as exc:
+            logger.exception("ssh_command_failed server_id=%s", server_id)
             raise SSHConnectionError(
                 f"Failed to execute command on server '{server_id}': {exc}"
             ) from exc
         finally:
             client.close()
 
+        logger.info(
+            "ssh_command_completed server_id=%s exit_status=%s",
+            server_id,
+            exit_status,
+        )
         return CommandExecutionResponse(
             server_id=server_id,
             command=command,

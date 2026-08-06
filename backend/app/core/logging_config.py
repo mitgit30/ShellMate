@@ -3,16 +3,32 @@
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s request_id=%(request_id)s %(message)s"
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_BACKUP_COUNT = 3
 
 
 _CONFIGURED = False
+_request_id: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+def set_request_id(request_id: str):
+    return _request_id.set(request_id)
+
+
+def reset_request_id(token) -> None:
+    _request_id.reset(token)
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id.get()
+        return True
 
 
 def configure_logging(
@@ -44,6 +60,8 @@ def configure_logging(
             )
         )
 
+    for handler in handlers:
+        handler.addFilter(RequestIdFilter())
     logging.basicConfig(level=resolved_level, format=LOG_FORMAT, handlers=handlers)
     _CONFIGURED = True
 

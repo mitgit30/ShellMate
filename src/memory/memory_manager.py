@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from src.memory.sqlite_store import SQLiteMemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
@@ -105,6 +108,13 @@ class MemoryManager:
             )
         except Exception:
             # Historical indexing must never break the primary agent turn.
+            logger.warning(
+                "historical_memory_index_failed server_id=%s source=%s session_id=%s",
+                server_id,
+                source,
+                session_id or "-",
+                exc_info=True,
+            )
             return
 
     def search_historical_memory(
@@ -127,6 +137,13 @@ class MemoryManager:
             )
         except Exception:
             # A missing embedding model or unavailable Chroma must not block chat.
+            logger.warning(
+                "historical_memory_search_failed server_id=%s date_from=%s date_to=%s",
+                server_id,
+                date_from or "-",
+                date_to or "-",
+                exc_info=True,
+            )
             return []
 
     @staticmethod
