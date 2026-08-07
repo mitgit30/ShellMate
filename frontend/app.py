@@ -60,25 +60,24 @@ def logout() -> None:
     st.session_state.connected_server_name = None
 
 
-def render_auth_page() -> bool:
-    st.title("ShellMate")
-    st.subheader("Access your servers securely")
-    if "auth_mode" not in st.session_state:
-        st.session_state.auth_mode = "login"
-    left, right = st.columns(2)
-    if left.button("Login", use_container_width=True):
-        st.session_state.auth_mode = "login"
-    if right.button("Create new", use_container_width=True):
-        st.session_state.auth_mode = "register"
-
-    title = "Login" if st.session_state.auth_mode == "login" else "Create account"
+@st.dialog("Welcome to ShellMate")
+def render_auth_dialog() -> None:
+    st.write("Sign in to manage your Linux servers, inspect live system information, and deploy safely.")
+    mode = st.radio(
+        "Account access",
+        options=["Login", "Create new"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    submit_label = "Login" if mode == "Login" else "Create account"
     with st.form("authentication-form"):
         email = st.text_input("Email", autocomplete="email")
         password = st.text_input("Password", type="password", autocomplete="new-password")
-        submitted = st.form_submit_button(title, use_container_width=True)
+        submitted = st.form_submit_button(submit_label, use_container_width=True)
     if submitted:
         try:
-            result = authenticate("login" if st.session_state.auth_mode == "login" else "register", email, password)
+            path = "login" if mode == "Login" else "register"
+            result = authenticate(path, email, password)
             st.session_state.access_token = result["access_token"]
             st.session_state.user_email = result["email"]
             st.rerun()
@@ -86,6 +85,19 @@ def render_auth_page() -> bool:
             st.error(exc.response.json().get("detail", "Authentication failed."))
         except httpx.HTTPError as exc:
             st.error(f"Backend is unreachable: {exc}")
+
+
+def render_auth_page() -> bool:
+    st.title("ShellMate")
+    _, content, _ = st.columns([1, 2, 1])
+    with content:
+        st.subheader("Your AI partner for Linux server operations")
+        st.write(
+            "Connect securely to your servers, understand what is happening in real time, "
+            "deploy applications through a guided workflow, and retrieve historical server activity."
+        )
+        if st.button("Get started", type="primary", use_container_width=False):
+            render_auth_dialog()
     return False
 
 
