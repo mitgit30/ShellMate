@@ -130,7 +130,11 @@ def initialize_session_state() -> None:
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
     if "chat_session_id" not in st.session_state:
-        st.session_state.chat_session_id = "streamlit-default-session"
+        st.session_state.chat_session_id = ""
+    if "history_loaded_for_server" not in st.session_state:
+        st.session_state.history_loaded_for_server = None
+    if "chat_sessions" not in st.session_state:
+        st.session_state.chat_sessions = []
     if "last_agent_events" not in st.session_state:
         st.session_state.last_agent_events = {"route": [], "tools": []}
 
@@ -183,6 +187,39 @@ def test_connection(server_id: str) -> dict:
         response = client.post(f"/servers/{server_id}/test")
         response.raise_for_status()
         return response.json()
+
+
+def list_chat_sessions(server_id: str) -> list[dict]:
+    with get_api_client() as client:
+        response = client.get("/chat/sessions", params={"server_id": server_id})
+        response.raise_for_status()
+        return response.json()
+
+
+def create_chat_session(server_id: str) -> dict:
+    with get_api_client() as client:
+        response = client.post("/chat/sessions", json={"server_id": server_id, "title": "New chat"})
+        response.raise_for_status()
+        return response.json()
+
+
+def load_chat_history(session_id: str, server_id: str) -> None:
+    with get_api_client() as client:
+        response = client.get(
+            "/chat/history",
+            params={"session_id": session_id, "server_id": server_id},
+        )
+        response.raise_for_status()
+    st.session_state.chat_session_id = session_id
+    st.session_state.chat_messages = response.json()
+    st.session_state.history_loaded_for_server = server_id
+
+
+def prepare_chat_for_server(server_id: str) -> None:
+    sessions = list_chat_sessions(server_id)
+    session = sessions[0] if sessions else create_chat_session(server_id)
+    st.session_state.chat_sessions = sessions or [session]
+    load_chat_history(session["session_id"], server_id)
 
 
 def stream_chat_message(session_id: str, server_id: str, message: str):
@@ -373,6 +410,7 @@ def render_connection_panel(servers: list[dict]) -> None:
     if st.button("Connect server", use_container_width=True):
         try:
             test_connection(selected_server)
+            prepare_chat_for_server(selected_server)
             st.session_state.connected_server_id = selected_server
             st.session_state.connected_server_name = selected_label
             st.session_state.active_view = "chat"
@@ -387,6 +425,44 @@ def render_connection_panel(servers: list[dict]) -> None:
             st.error(f"Backend is unreachable: {exc}")
 
 
+def render_chat_sessions() -> None:
+    server_id = st.session_state.connected_server_id
+    if not server_id:
+        return
+
+    try:
+        sessions = list_chat_sessions(server_id)
+        if not sessions:
+            sessions = [create_chat_session(server_id)]
+        st.session_state.chat_sessions = sessions
+    except httpx.HTTPError as exc:
+        st.warning(f"Chat sessions could not be loaded: {exc}")
+        return
+
+    session_labels = {session["session_id"]: session["title"] for session in sessions}
+    active_session_id = st.session_state.get("chat_session_id") or sessions[0]["session_id"]
+    if active_session_id not in session_labels:
+        active_session_id = sessions[0]["session_id"]
+
+    st.subheader("Chats")
+    selected_session_id = st.selectbox(
+        "Conversation",
+        options=list(session_labels),
+        index=list(session_labels).index(active_session_id),
+        format_func=lambda session_id: session_labels[session_id],
+        key=f"chat-selector-{server_id}",
+        label_visibility="collapsed",
+    )
+    if selected_session_id != st.session_state.get("chat_session_id"):
+        load_chat_history(selected_session_id, server_id)
+        st.rerun()
+
+    if st.button("+ New chat", use_container_width=True):
+        new_session = create_chat_session(server_id)
+        load_chat_history(new_session["session_id"], server_id)
+        st.rerun()
+
+
 def render_chat_panel() -> None:
     st.subheader("Chat Workspace")
     connected_server_id = st.session_state.connected_server_id
@@ -395,6 +471,12 @@ def render_chat_panel() -> None:
     if not connected_server_id:
         st.info("Connect to a registered server from the sidebar to unlock chat access.")
         return
+
+    if st.session_state.history_loaded_for_server != connected_server_id:
+        try:
+            prepare_chat_for_server(connected_server_id)
+        except httpx.HTTPError as exc:
+            st.warning(f"Chat history could not be loaded: {exc}")
 
     st.caption(f"Connected server: {connected_server_name}")
     for message in st.session_state.chat_messages:
@@ -415,7 +497,7 @@ def render_chat_panel() -> None:
         with st.chat_message("assistant"):
             assistant_reply = st.write_stream(
                 stream_chat_message(
-                    session_id=st.session_state.chat_session_id,
+                    session_id=get_chat_session_id(connected_server_id),
                     server_id=connected_server_id,
                     message=prompt.strip(),
                 )
@@ -464,6 +546,7 @@ def render_sidebar(servers: list[dict]) -> list[dict]:
         st.divider()
         st.subheader("Connection Access")
         render_connection_panel(sidebar_servers)
+        render_chat_sessions()
 
         connected_server_name = st.session_state.connected_server_name
         if connected_server_name:
