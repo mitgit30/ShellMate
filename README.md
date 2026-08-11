@@ -124,8 +124,6 @@ OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your-ollama-cloud-key
 OLLAMA_MODEL=your-chat-model
 OLLAMA_EMBEDDING_MODEL=your-embedding-model
-# Optional legacy shared-key compatibility; login is preferred
-SHELLMATE_API_KEY=
 CORS_ALLOWED_ORIGINS=http://localhost:8501
 ```
 

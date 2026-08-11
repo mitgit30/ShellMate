@@ -78,14 +78,17 @@ class SSHService:
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         return client
 
-    @staticmethod
-    def _connect(client: paramiko.SSHClient, server) -> None:
+    def _connect(self, client: paramiko.SSHClient, server) -> None:
         try:
             key_path = Path(server.private_key_path)
             if not key_path.exists():
-                raise SSHConnectionError(
-                    f"Private key file for server '{server.id}' was not found."
-                )
+                local_key_path = self._settings.ssh_key_storage_dir / key_path.name
+                if local_key_path.exists():
+                    key_path = local_key_path
+                else:
+                    raise SSHConnectionError(
+                        f"Private key file for server '{server.id}' was not found."
+                    )
 
             connect_kwargs = {
                 "hostname": server.host,

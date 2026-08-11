@@ -23,6 +23,15 @@ class ServerOpsAgent:
         self._session_store = session_store
         self._context_extractor = context_extractor
 
+    def restore_session(self, session_id: str, server_id: str, messages: list[dict]) -> None:
+        """Restore persisted conversation messages before continuing a session."""
+        session = self._session_store.get_or_create(session_id=session_id, server_id=server_id)
+        session.messages = [
+            {"role": item["role"], "content": item["content"]}
+            for item in messages
+            if item.get("role") in {"user", "assistant"} and item.get("content")
+        ]
+
     def handle_turn(self, session_id: str, server_id: str, user_message: str) -> AgentTurnResult:
         reply_parts: list[str] = []
         tool_events: list[ToolEvent] = []

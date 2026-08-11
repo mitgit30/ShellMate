@@ -10,6 +10,7 @@ from backend.app.api.v1.routes.commands import router as commands_router
 from backend.app.api.v1.routes.health import router as health_router
 from backend.app.api.v1.routes.auth import router as auth_router
 from backend.app.api.v1.routes.keys import router as keys_router
+from backend.app.api.v1.routes.monitor import router as monitor_router
 from backend.app.api.v1.routes.servers import router as servers_router
 from backend.app.api.v1.routes.sessions import router as sessions_router
 from backend.app.core.config import get_settings
@@ -79,6 +80,7 @@ app.include_router(auth_router, prefix="/api/v1")
 protected_routes = {"dependencies": [Depends(get_current_user)]}
 app.include_router(chat_router, prefix="/api/v1", **protected_routes)
 app.include_router(keys_router, prefix="/api/v1", **protected_routes)
+app.include_router(monitor_router, prefix="/api/v1", **protected_routes)
 app.include_router(servers_router, prefix="/api/v1", **protected_routes)
 app.include_router(sessions_router, prefix="/api/v1", **protected_routes)
 app.include_router(commands_router, prefix="/api/v1", **protected_routes)

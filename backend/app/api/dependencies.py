@@ -18,9 +18,13 @@ from src.tools.builder_tool import BuilderTool
 from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
 from backend.app.repositories.user_repository import UserRepository
+from backend.app.services.monitor_service import MonitorService
+from backend.app.services.chat_history_service import ChatHistoryService
 settings = get_settings()
 server_repository = SQLiteServerRepository(settings.server_database_path)
 user_repository = UserRepository(settings.server_database_path)
+monitor_service = MonitorService(settings.server_database_path)
+chat_history_service = ChatHistoryService(settings.server_database_path)
 key_storage_service = KeyStorageService()
 server_service = ServerService(
     server_repository=server_repository,

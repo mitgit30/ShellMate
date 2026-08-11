@@ -1,13 +1,15 @@
 import logging
 import json
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from backend.app.api.dependencies import server_ops_agent
+from backend.app.api.dependencies import chat_history_service, monitor_service, server_ops_agent, server_service
+from backend.app.core.auth import get_current_user
+from backend.app.repositories.user_repository import User
 from backend.app.core.error_handling import log_exception, public_error_message, status_code_for_exception
 from backend.app.core.exceptions import SSHConnectionError, ServerNotFoundError
-from backend.app.schemas.chat import ChatRequest, ChatResponse, ChatToolEvent
+from backend.app.schemas.chat import ChatHistoryMessage, ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionSummary, ChatToolEvent
 from src.runtime.models import AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -15,49 +17,117 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+def restore_chat_session(payload: ChatRequest, user_id: str) -> None:
+    chat_history_service.ensure_session(user_id, payload.session_id, payload.server_id, payload.message[:60])
+    history = chat_history_service.list_messages(user_id, payload.session_id, payload.server_id)
+    server_ops_agent.restore_session(payload.session_id, payload.server_id, history)
+
+
 @router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-def chat(payload: ChatRequest) -> ChatResponse:
+def chat(payload: ChatRequest, user: User = Depends(get_current_user)) -> ChatResponse:
+    server_service.get_server_record(payload.server_id, user.id)
+    restore_chat_session(payload, user.id)
+    task_id = monitor_service.start_task(user.id, payload.session_id, payload.server_id, payload.message)
     try:
-        result = server_ops_agent.handle_turn(
+        reply_parts: list[str] = []
+        tool_events: list[ChatToolEvent] = []
+        for event in server_ops_agent.stream_turn(
             session_id=payload.session_id,
             server_id=payload.server_id,
             user_message=payload.message,
-        )
+        ):
+            monitor_service.record_event(task_id, event.as_payload())
+            if event.type == "token":
+                reply_parts.append(event.content or "")
+            elif event.type == "tool_event":
+                tool_events.append(ChatToolEvent(
+                    tool_name=event.tool_name or "",
+                    command=event.command or "",
+                    exit_status=event.exit_status or 0,
+                ))
+        monitor_service.complete_task(task_id)
+        reply = "".join(reply_parts).strip()
+        chat_history_service.append(user.id, payload.session_id, payload.server_id, "user", payload.message)
+        chat_history_service.append(user.id, payload.session_id, payload.server_id, "assistant", reply)
     except (ServerNotFoundError, SSHConnectionError, ValueError, RuntimeError) as exc:
+        monitor_service.fail_task(task_id, public_error_message(exc))
         raise HTTPException(status_code=status_code_for_exception(exc), detail=public_error_message(exc)) from exc
     except Exception as exc:
+        monitor_service.fail_task(task_id, public_error_message(exc))
         log_exception(logger, "chat request", exc, {"session_id": payload.session_id, "server_id": payload.server_id})
         raise HTTPException(status_code=500, detail=public_error_message(exc)) from exc
 
     return ChatResponse(
         session_id=payload.session_id,
         server_id=payload.server_id,
-        reply=result.reply,
-        tool_events=[
-            ChatToolEvent(
-                tool_name=event.tool_name,
-                command=event.command,
-                exit_status=event.exit_status,
-            )
-            for event in result.tool_events
-        ],
+        reply=reply,
+        tool_events=tool_events,
+    )
+
+
+@router.get("/history", response_model=list[ChatHistoryMessage])
+def chat_history(
+    session_id: str,
+    server_id: str,
+    user: User = Depends(get_current_user),
+) -> list[ChatHistoryMessage]:
+    server_service.get_server_record(server_id, user.id)
+    return [
+        ChatHistoryMessage(**message)
+        for message in chat_history_service.list_messages(user.id, session_id, server_id)
+    ]
+
+
+@router.get("/sessions", response_model=list[ChatSessionSummary])
+def chat_sessions(server_id: str, user: User = Depends(get_current_user)) -> list[ChatSessionSummary]:
+    server_service.get_server_record(server_id, user.id)
+    return [
+        ChatSessionSummary(**session)
+        for session in chat_history_service.list_sessions(user.id, server_id)
+    ]
+
+
+@router.post("/sessions", response_model=ChatSessionSummary, status_code=status.HTTP_201_CREATED)
+def create_chat_session(
+    payload: ChatSessionCreate,
+    user: User = Depends(get_current_user),
+) -> ChatSessionSummary:
+    server_service.get_server_record(payload.server_id, user.id)
+    return ChatSessionSummary(
+        **chat_history_service.create_session(user.id, payload.server_id, payload.title)
     )
 
 
 @router.post("/stream", status_code=status.HTTP_200_OK)
-def chat_stream(payload: ChatRequest) -> StreamingResponse:
+def chat_stream(payload: ChatRequest, user: User = Depends(get_current_user)) -> StreamingResponse:
+    server_service.get_server_record(payload.server_id, user.id)
+    restore_chat_session(payload, user.id)
+    task_id = monitor_service.start_task(user.id, payload.session_id, payload.server_id, payload.message)
     def event_stream():
+        reply_parts: list[str] = []
         try:
             for event in server_ops_agent.stream_turn(
                 session_id=payload.session_id,
                 server_id=payload.server_id,
                 user_message=payload.message,
             ):
+                monitor_service.record_event(task_id, event.as_payload())
+                if event.type == "token":
+                    reply_parts.append(event.content or "")
                 yield json.dumps(event.as_payload()) + "\n"
         except (ServerNotFoundError, SSHConnectionError, ValueError, RuntimeError) as exc:
+            monitor_service.fail_task(task_id, public_error_message(exc))
             yield json.dumps(AgentEvent(type="error", detail=public_error_message(exc), status_code=status_code_for_exception(exc)).as_payload()) + "\n"
         except Exception as exc:
+            monitor_service.fail_task(task_id, public_error_message(exc))
             log_exception(logger, "chat stream", exc, {"session_id": payload.session_id, "server_id": payload.server_id})
             yield json.dumps(AgentEvent(type="error", detail=public_error_message(exc), status_code=status_code_for_exception(exc)).as_payload()) + "\n"
+        else:
+            monitor_service.complete_task(task_id)
+            reply = "".join(reply_parts).strip()
+            chat_history_service.append(user.id, payload.session_id, payload.server_id, "user", payload.message)
+            chat_history_service.append(user.id, payload.session_id, payload.server_id, "assistant", reply)
 
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+    response = StreamingResponse(event_stream(), media_type="application/x-ndjson")
+    response.headers["X-Agent-Task-ID"] = task_id
+    return response
