@@ -20,11 +20,13 @@ from src.tools.ssh_tool import SSHCommandTool
 from backend.app.repositories.user_repository import UserRepository
 from backend.app.services.monitor_service import MonitorService
 from backend.app.services.chat_history_service import ChatHistoryService
+from backend.app.services.chat_analytics_service import ChatAnalyticsService
 settings = get_settings()
 server_repository = SQLiteServerRepository(settings.server_database_path)
 user_repository = UserRepository(settings.server_database_path)
 monitor_service = MonitorService(settings.server_database_path)
 chat_history_service = ChatHistoryService(settings.server_database_path)
+chat_analytics_service = ChatAnalyticsService(settings.server_database_path)
 key_storage_service = KeyStorageService()
 server_service = ServerService(
     server_repository=server_repository,
@@ -60,4 +62,5 @@ server_ops_agent = ServerOpsAgent(
     skill_registry=skill_registry,
     session_store=session_store,
     context_extractor=context_extractor,
+    memory_manager=memory_manager,
 )

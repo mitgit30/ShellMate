@@ -1,4 +1,5 @@
 from functools import lru_cache
+from datetime import datetime
 
 import httpx
 import streamlit as st
@@ -75,44 +76,82 @@ def _status_badge(status: str) -> str:
     }.get(status, status.title())
 
 
-@st.fragment(run_every="3s")
+def _format_time(value: str | None) -> str:
+    if not value:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%d %b %Y, %I:%M %p")
+    except ValueError:
+        return value
+
+
 def render_dashboard() -> None:
+    st.markdown(
+        """
+        <style>
+        .monitor-caption { color: #8b949e; font-size: 0.9rem; }
+        .monitor-section { margin-top: 1.2rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     server_id = st.session_state.get("monitor_server_id")
     task_path = "/monitor/tasks"
     if server_id:
         task_path += f"?server_id={server_id}"
-    tasks = api_get(task_path)
+    try:
+        tasks = api_get(task_path)
+    except httpx.HTTPError as exc:
+        st.error(f"Could not load monitoring data: {exc}")
+        return
+
+    refresh_column, filter_column = st.columns([1, 3])
+    with refresh_column:
+        if st.button("Refresh", use_container_width=True):
+            st.rerun()
+    with filter_column:
+        st.markdown(
+            "<p class='monitor-caption'>Refresh manually when you want the latest agent activity.</p>",
+            unsafe_allow_html=True,
+        )
+
     if not tasks:
-        st.info("No agent tasks have been recorded yet.")
+        st.info("No agent tasks have been recorded for this server yet.")
         return
 
     labels = {
-        task["task_id"]: f"{_status_badge(task['status'])} · {task['server_id']} · {task['started_at']}"
+        task["task_id"]: f"{_status_badge(task['status'])}  {_format_time(task.get('started_at'))}  ·  {task['user_request'][:70]}"
         for task in tasks
     }
     selected_task_id = st.selectbox(
-        "Task",
+        "Select a task",
         options=list(labels),
         format_func=lambda task_id: labels[task_id],
+        key="monitor-task-selector",
     )
-    details = api_get(f"/monitor/tasks/{selected_task_id}")
+    try:
+        details = api_get(f"/monitor/tasks/{selected_task_id}")
+    except httpx.HTTPError as exc:
+        st.error(f"Could not load task details: {exc}")
+        return
     task = details["task"]
     events = details["events"]
 
-    st.subheader("Task")
-    st.write(task["user_request"])
+    st.markdown("### Task overview")
+    st.info(task["user_request"])
     columns = st.columns(4)
     columns[0].metric("Status", task["status"].title())
     columns[1].metric("Server", task["server_id"])
-    columns[2].metric("Skill", task.get("current_skill") or "—")
+    columns[2].metric("Active skill", task.get("current_skill") or "—")
     columns[3].metric("Deployment", task["deployment_status"].replace("_", " ").title())
 
-    st.subheader("Live progress")
+    st.markdown("### Progress")
     st.write(task.get("current_step") or "Waiting for the next agent step.")
     if task.get("error_message"):
         st.error(task["error_message"])
 
-    st.subheader("Tools used")
+    st.markdown("### Tools used")
     tool_events = [
         event for event in events
         if event["event_type"] in {"tool_called", "tool_event"}
@@ -122,8 +161,10 @@ def render_dashboard() -> None:
             [
                 {
                     "Tool": event.get("tool_name") or "Unknown",
-                    "Status": "Success" if event.get("exit_status") in (None, 0) else "Failed",
-                    "Time": event["created_at"],
+                    "Command": event.get("command") or "—",
+                    "Iteration": event.get("iteration") or "—",
+                    "Result": "Completed" if event.get("exit_status") in (None, 0) else "Failed",
+                    "Time": _format_time(event.get("created_at")),
                 }
                 for event in tool_events
             ],
@@ -133,15 +174,23 @@ def render_dashboard() -> None:
     else:
         st.caption("No tools have been used for this task yet.")
 
-    with st.expander("Event timeline"):
+    with st.expander("Technical event timeline", expanded=False):
         st.dataframe(
             [
                 {
                     "Event": event["event_type"],
                     "Detail": event.get("detail") or event.get("step") or "",
-                    "Time": event["created_at"],
+                    "Result": (
+                        "Completed"
+                        if event.get("exit_status") in (None, 0)
+                        else "Failed"
+                        if event.get("exit_status") is not None
+                        else "—"
+                    ),
+                    "Time": _format_time(event.get("created_at")),
                 }
                 for event in events
+                if event["event_type"] != "token"
             ],
             use_container_width=True,
             hide_index=True,
@@ -155,12 +204,16 @@ def main() -> None:
         render_login()
         return
 
-    st.title("ShellMate Agent Monitor")
-    st.caption(f"Signed in as {st.session_state.get('monitor_email', 'user')}")
-    if st.button("Logout"):
-        st.session_state.pop("access_token", None)
-        st.session_state.pop("monitor_email", None)
-        st.rerun()
+    header, logout_column = st.columns([5, 1])
+    with header:
+        st.title("ShellMate Agent Monitor")
+        server_label = st.session_state.get("monitor_server_id") or "All connected servers"
+        st.caption(f"Monitoring: {server_label} · Signed in as {st.session_state.get('monitor_email', 'user')}")
+    with logout_column:
+        if st.button("Logout", use_container_width=True):
+            st.session_state.pop("access_token", None)
+            st.session_state.pop("monitor_email", None)
+            st.rerun()
     render_dashboard()
 
 

@@ -74,6 +74,36 @@ class ChatHistoryService:
             raise ValueError("Chat session was not found.")
         return dict(row)
 
+    def set_title(self, user_id: str, session_id: str, server_id: str, title: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE chat_sessions SET title = ?, updated_at = ?
+                WHERE user_id = ? AND session_id = ? AND server_id = ?""",
+                (title[:120], _now(), user_id, session_id, server_id),
+            )
+            connection.commit()
+
+    def delete_session(self, user_id: str, session_id: str, server_id: str) -> bool:
+        with self._connect() as connection:
+            exists = connection.execute(
+                """SELECT 1 FROM chat_sessions
+                WHERE user_id = ? AND session_id = ? AND server_id = ?""",
+                (user_id, session_id, server_id),
+            ).fetchone()
+            if exists is None:
+                return False
+            connection.execute(
+                """DELETE FROM chat_messages
+                WHERE user_id = ? AND session_id = ? AND server_id = ?""",
+                (user_id, session_id, server_id),
+            )
+            connection.execute(
+                "DELETE FROM chat_sessions WHERE user_id = ? AND session_id = ? AND server_id = ?",
+                (user_id, session_id, server_id),
+            )
+            connection.commit()
+        return True
+
     def list_messages(self, user_id: str, session_id: str, server_id: str) -> list[dict]:
         with self._connect() as connection:
             rows = connection.execute(

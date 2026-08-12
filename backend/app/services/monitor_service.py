@@ -29,9 +29,16 @@ class MonitorService:
 
     def record_event(self, task_id: str, event: dict) -> None:
         event_type = str(event.get("type", "unknown"))
+        # Token chunks are response transport details, not useful monitor events.
+        if event_type == "token":
+            return
         step = _text(event.get("step"))
         skill_id = _text(event.get("skill_id"))
         tool_name = _text(event.get("tool_name"))
+        command = _text(event.get("command"))
+        iteration = event.get("iteration")
+        if not isinstance(iteration, int):
+            iteration = None
         detail = _text(event.get("detail") or event.get("reason"))
         exit_status = event.get("exit_status")
         if not isinstance(exit_status, int):
@@ -44,9 +51,9 @@ class MonitorService:
             ).fetchone()
             connection.execute(
                 """INSERT INTO agent_events
-                (task_id, event_type, detail, skill_id, step, tool_name, exit_status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (task_id, event_type, detail, skill_id, step, tool_name, exit_status, _now()),
+                (task_id, event_type, detail, skill_id, step, tool_name, command, iteration, exit_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (task_id, event_type, detail, skill_id, step, tool_name, command, iteration, exit_status, _now()),
             )
             updates: dict[str, object] = {}
             if skill_id:
@@ -150,10 +157,17 @@ class MonitorService:
                     skill_id TEXT,
                     step TEXT,
                     tool_name TEXT,
+                    command TEXT,
+                    iteration INTEGER,
                     exit_status INTEGER,
                     created_at TEXT NOT NULL
                 )"""
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(agent_events)")}
+            if "command" not in columns:
+                connection.execute("ALTER TABLE agent_events ADD COLUMN command TEXT")
+            if "iteration" not in columns:
+                connection.execute("ALTER TABLE agent_events ADD COLUMN iteration INTEGER")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -178,6 +192,7 @@ class MonitorService:
             event_id=row["event_id"], task_id=row["task_id"], event_type=row["event_type"],
             detail=row["detail"], skill_id=row["skill_id"], step=row["step"],
             tool_name=row["tool_name"], exit_status=row["exit_status"], created_at=row["created_at"],
+            command=row["command"], iteration=row["iteration"],
         )
 
 

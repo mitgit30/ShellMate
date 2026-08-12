@@ -13,6 +13,8 @@ EventType = Literal[
     "step_completed",
     "tool_called",
     "tool_event",
+    "historical_memory_retrieved",
+    "historical_memory_unavailable",
 ]
 
 
@@ -34,6 +36,10 @@ class AgentEvent(BaseModel):
     stdout: str = ""
     stderr: str = ""
     status_code: int | None = None
+    source: str | None = None
+    matches: int | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
     def as_payload(self) -> dict[str, Any]:
         """Return the transport-safe JSON payload for this event."""

@@ -64,6 +64,7 @@ class DeploymentSkill(BaseSkill):
             memory_manager=self._memory_manager,
             require_json=False,
             historical_query=context.user_message,
+            session_id=context.session_id,
         )
         response = self._model_client.chat(
             messages=[

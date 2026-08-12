@@ -137,8 +137,6 @@ def initialize_session_state() -> None:
         st.session_state.history_loaded_for_server = None
     if "chat_sessions" not in st.session_state:
         st.session_state.chat_sessions = []
-    if "last_agent_events" not in st.session_state:
-        st.session_state.last_agent_events = {"route": [], "tools": []}
 
 
 def list_servers() -> list[dict]:
@@ -216,6 +214,15 @@ def create_chat_session(server_id: str) -> dict:
         return response.json()
 
 
+def delete_chat_session(session_id: str, server_id: str) -> None:
+    with get_api_client() as client:
+        response = client.delete(
+            f"/chat/sessions/{session_id}",
+            params={"server_id": server_id},
+        )
+        response.raise_for_status()
+
+
 def load_chat_history(session_id: str, server_id: str) -> None:
     with get_api_client() as client:
         response = client.get(
@@ -236,8 +243,6 @@ def prepare_chat_for_server(server_id: str) -> None:
 
 
 def stream_chat_message(session_id: str, server_id: str, message: str):
-    st.session_state.pending_tool_events = []
-    st.session_state.pending_route_events = []
     token_delay = get_settings().stream_token_delay_seconds
     payload = {
         "session_id": session_id,
@@ -258,57 +263,10 @@ def stream_chat_message(session_id: str, server_id: str, message: str):
                     if token_delay > 0:
                         time.sleep(token_delay)
                     yield event.get("content", "")
-                elif event_type == "tool_event":
-                    st.session_state.pending_tool_events.append(event)
-                elif event_type in {
-                    "intent_detected",
-                    "skill_selected",
-                    "step_started",
-                    "step_completed",
-                    "tool_called",
-                }:
-                    st.session_state.pending_route_events.append(event)
                 elif event_type == "error":
                     raise RuntimeError(event.get("detail", "Streaming chat failed."))
                 elif event_type == "done":
                     break
-
-def render_last_agent_trace() -> None:
-    route_events = st.session_state.last_agent_events.get("route", [])
-    tool_events = st.session_state.last_agent_events.get("tools", [])
-    if not route_events and not tool_events:
-        return
-
-    with st.expander("Latest Agent Trace", expanded=False):
-        if route_events:
-              route_lines = []
-              for event in route_events:
-                 
-                  ev_type = event.get("type")
-                  if ev_type == "intent_detected":
-                      route_lines.append(f"- Intent: {event.get('detail', '<missing detail>')}")
-                  elif ev_type == "skill_selected":
-                      route_lines.append(
-                          f"- Skill: {event.get('skill_id', '<unknown>')} "
-                          f"({event.get('reason', '<no reason>')})"
-                      )
-                  elif event["type"] == "step_started":
-                    route_lines.append(f"- Step started: {event['detail']}")
-                  elif event["type"] == "step_completed":
-                    route_lines.append(f"- Step completed: {event['detail']}")
-                  
-                  elif ev_type == "tool_called":
-                    cmd = event.get("command", "<no command>")
-                    it = event.get("iteration", "?")
-                    route_lines.append(f"- Tool called: `{cmd}` (iteration {it})")
-                    
-
-            
-        if route_lines:
-            st.markdown("\n".join(route_lines))
-     
-  
-
 
 def load_styles() -> None:
     st.markdown(
@@ -470,10 +428,20 @@ def render_chat_sessions() -> None:
         load_chat_history(selected_session_id, server_id)
         st.rerun()
 
-    if st.button("+ New chat", use_container_width=True):
+    new_column, delete_column = st.columns(2)
+    if new_column.button("+ New chat", use_container_width=True):
         new_session = create_chat_session(server_id)
         load_chat_history(new_session["session_id"], server_id)
         st.rerun()
+    if delete_column.button("Delete chat", use_container_width=True):
+        try:
+            delete_chat_session(selected_session_id, server_id)
+            remaining = list_chat_sessions(server_id)
+            next_session = remaining[0] if remaining else create_chat_session(server_id)
+            load_chat_history(next_session["session_id"], server_id)
+            st.rerun()
+        except httpx.HTTPError as exc:
+            st.error(f"Chat could not be deleted: {exc}")
 
 
 def render_chat_panel() -> None:
@@ -496,8 +464,6 @@ def render_chat_panel() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    render_last_agent_trace()
-
     prompt = st.chat_input("Ask something like: check uptime or deploy my app")
     if not prompt:
         return
@@ -515,10 +481,6 @@ def render_chat_panel() -> None:
                     message=prompt.strip(),
                 )
             )
-            st.session_state.last_agent_events = {
-                "route": list(st.session_state.get("pending_route_events", [])),
-                "tools": list(st.session_state.get("pending_tool_events", [])),
-            }
     except httpx.HTTPStatusError as exc:
         assistant_reply = f"Agent request failed: {exc.response.text}"
         with st.chat_message("assistant"):

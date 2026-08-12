@@ -25,6 +25,8 @@ class MonitorEvent(BaseModel):
     skill_id: str | None = None
     step: str | None = None
     tool_name: str | None = None
+    command: str | None = None
+    iteration: int | None = None
     exit_status: int | None = None
     created_at: datetime
 

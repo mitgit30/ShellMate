@@ -22,6 +22,7 @@ class PromptComposer:
         server_id: str,
         memory_manager: Any,
         historical_query: str | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Fetch and format the memory block consistently."""
         handoff = memory_manager.read_handoff(server_id)
@@ -43,6 +44,7 @@ class PromptComposer:
                 limit=3,
                 date_from=date_range.start if date_range else None,
                 date_to=date_range.end if date_range else None,
+                session_id=session_id,
             )
             if historical:
                 blocks.append(
@@ -64,6 +66,7 @@ class PromptComposer:
         memory_manager: Any = None,
         require_json: bool = False,
         historical_query: str | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Combines the domain instruction with centralized formatting, safety rules, and memory."""
         parts = [domain_instruction.strip()]
@@ -84,6 +87,7 @@ class PromptComposer:
                 server_id,
                 memory_manager,
                 historical_query=historical_query,
+                session_id=session_id,
             )
             if memory_block:
                 parts.append(memory_block)

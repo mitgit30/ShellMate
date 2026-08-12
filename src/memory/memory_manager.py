@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from src.memory.sqlite_store import SQLiteMemoryStore
@@ -27,6 +29,8 @@ class MemoryManager:
             database_path = (base_dir / "memory.db") if base_dir else project_root / "backend" / "data" / "memory.db"
         self._store = SQLiteMemoryStore(database_path)
         self._historical_store = historical_store
+        self._retrieval_events: dict[str, list[dict[str, str | int | None]]] = defaultdict(list)
+        self._retrieval_events_lock = RLock()
         if self._historical_store is None and historical_memory_path is not None:
             self._historical_store = self._create_historical_store(historical_memory_path)
 
@@ -124,17 +128,39 @@ class MemoryManager:
         limit: int = 3,
         date_from: date | None = None,
         date_to: date | None = None,
+        session_id: str | None = None,
     ) -> list[str]:
         if self._historical_store is None:
             return []
         try:
-            return self._historical_store.search(
+            results = self._historical_store.search(
                 server_id=server_id,
                 query=query,
                 limit=limit,
                 date_from=date_from,
                 date_to=date_to,
             )
+            if session_id:
+                date_label = ""
+                if date_from and date_to:
+                    date_label = date_from.isoformat() if date_from == date_to else f"{date_from.isoformat()} to {date_to.isoformat()}"
+                detail = f"ChromaDB retrieved {len(results)} historical record(s)"
+                if date_label:
+                    detail += f" for {date_label}"
+                elif not results:
+                    detail += " matching this request"
+                self._queue_retrieval_event(
+                    session_id,
+                    {
+                        "type": "historical_memory_retrieved",
+                        "source": "ChromaDB",
+                        "matches": len(results),
+                        "date_from": date_from.isoformat() if date_from else None,
+                        "date_to": date_to.isoformat() if date_to else None,
+                        "detail": detail + ".",
+                    },
+                )
+            return results
         except Exception:
             # A missing embedding model or unavailable Chroma must not block chat.
             logger.warning(
@@ -144,7 +170,26 @@ class MemoryManager:
                 date_to or "-",
                 exc_info=True,
             )
+            if session_id:
+                self._queue_retrieval_event(
+                    session_id,
+                    {
+                        "type": "historical_memory_unavailable",
+                        "source": "ChromaDB",
+                        "matches": 0,
+                        "detail": "ChromaDB historical memory was unavailable for this request.",
+                    },
+                )
             return []
+
+    def consume_historical_retrieval_events(self, session_id: str) -> list[dict]:
+        """Return and clear retrieval events generated during the current turn."""
+        with self._retrieval_events_lock:
+            return list(self._retrieval_events.pop(session_id, []))
+
+    def _queue_retrieval_event(self, session_id: str, event: dict) -> None:
+        with self._retrieval_events_lock:
+            self._retrieval_events[session_id].append(event)
 
     @staticmethod
     def _trim_lines(content: str, limit: int) -> str:

@@ -126,6 +126,7 @@ class SSHSkill(BaseSkill):
             memory_manager=self._memory_manager,
             require_json=False,
             historical_query=context.user_message,
+            session_id=context.session_id,
         )
         system_message = {
             "role": "system",

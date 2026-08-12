@@ -2,6 +2,7 @@ import logging
 from collections.abc import Iterator
 
 from src.memory.context_extractor import ContextExtractor
+from src.memory.memory_manager import MemoryManager
 from src.runtime.models import AgentEvent, AgentTurnResult, ToolEvent
 from src.skills.base import SkillContext
 from src.skills.registry import SkillRegistry
@@ -17,11 +18,13 @@ class ServerOpsAgent:
         skill_registry: SkillRegistry,
         session_store,
         context_extractor: ContextExtractor,
+        memory_manager: MemoryManager,
     ) -> None:
         self._skill_router = skill_router
         self._skill_registry = skill_registry
         self._session_store = session_store
         self._context_extractor = context_extractor
+        self._memory_manager = memory_manager
 
     def restore_session(self, session_id: str, server_id: str, messages: list[dict]) -> None:
         """Restore persisted conversation messages before continuing a session."""
@@ -108,6 +111,7 @@ class ServerOpsAgent:
 
         reply_parts: list[str] = []
         tool_outputs: list[str] = []
+        deferred_done = False
         try:
             for raw_event in skill.execute(context):
                 event = AgentEvent.model_validate(raw_event)
@@ -118,6 +122,9 @@ class ServerOpsAgent:
                         tool_outputs.append(event.stdout)
                     if event.stderr:
                         tool_outputs.append(event.stderr)
+                if event.type == "done":
+                    deferred_done = True
+                    continue
                 yield event
         except Exception as exc:
             logger.exception("Skill execution failed", extra={"session_id": session_id, "server_id": server_id, "skill_id": route.skill_id})
@@ -129,6 +136,11 @@ class ServerOpsAgent:
             yield AgentEvent(type="done")
             self._persist_session(session=session, user_message=user_message, reply=fallback_reply)
             return
+
+        for retrieval_event in self._memory_manager.consume_historical_retrieval_events(session_id):
+            yield AgentEvent.model_validate(retrieval_event)
+        if deferred_done:
+            yield AgentEvent(type="done")
 
         reply = "".join(reply_parts).strip()
         try:
