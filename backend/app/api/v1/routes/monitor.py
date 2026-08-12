@@ -9,8 +9,11 @@ router = APIRouter(prefix="/monitor", tags=["monitor"])
 
 
 @router.get("/tasks", response_model=list[MonitorTask])
-def list_monitor_tasks(user: User = Depends(get_current_user)) -> list[MonitorTask]:
-    return monitor_service.list_tasks(user.id)
+def list_monitor_tasks(
+    server_id: str | None = None,
+    user: User = Depends(get_current_user),
+) -> list[MonitorTask]:
+    return monitor_service.list_tasks(user.id, server_id=server_id)
 
 
 @router.get("/tasks/{task_id}", response_model=MonitorTaskDetails)

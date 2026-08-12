@@ -1,6 +1,7 @@
 from functools import lru_cache
 import json
 import time
+from urllib.parse import urlencode
 
 import httpx
 import streamlit as st
@@ -10,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class FrontendSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000/api/v1")
+    monitor_url: str = Field(default="http://localhost:8502")
     stream_token_delay_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = SettingsConfigDict(
@@ -187,6 +189,17 @@ def test_connection(server_id: str) -> dict:
         response = client.post(f"/servers/{server_id}/test")
         response.raise_for_status()
         return response.json()
+
+
+def render_monitor_link() -> None:
+    server_id = st.session_state.get("connected_server_id")
+    token = st.session_state.get("access_token")
+    if not server_id or not token:
+        return
+
+    monitor_url = get_settings().monitor_url.rstrip("/")
+    handoff_url = f"{monitor_url}/?{urlencode({'access_token': token, 'server_id': server_id})}"
+    st.link_button("Open Agent Monitor", handoff_url, use_container_width=True)
 
 
 def list_chat_sessions(server_id: str) -> list[dict]:
@@ -497,7 +510,7 @@ def render_chat_panel() -> None:
         with st.chat_message("assistant"):
             assistant_reply = st.write_stream(
                 stream_chat_message(
-                    session_id=get_chat_session_id(connected_server_id),
+                    session_id=st.session_state.chat_session_id,
                     server_id=connected_server_id,
                     message=prompt.strip(),
                 )
@@ -546,6 +559,7 @@ def render_sidebar(servers: list[dict]) -> list[dict]:
         st.divider()
         st.subheader("Connection Access")
         render_connection_panel(sidebar_servers)
+        render_monitor_link()
         render_chat_sessions()
 
         connected_server_name = st.session_state.connected_server_name

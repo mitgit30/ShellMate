@@ -95,12 +95,18 @@ class MonitorService:
             )
             connection.commit()
 
-    def list_tasks(self, user_id: str, limit: int = 25) -> list[MonitorTask]:
+    def list_tasks(self, user_id: str, server_id: str | None = None, limit: int = 25) -> list[MonitorTask]:
         with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT * FROM agent_tasks WHERE user_id = ?
-                ORDER BY started_at DESC LIMIT ?""", (user_id, limit)
-            ).fetchall()
+            if server_id:
+                rows = connection.execute(
+                    """SELECT * FROM agent_tasks WHERE user_id = ? AND server_id = ?
+                    ORDER BY started_at DESC LIMIT ?""", (user_id, server_id, limit)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT * FROM agent_tasks WHERE user_id = ?
+                    ORDER BY started_at DESC LIMIT ?""", (user_id, limit)
+                ).fetchall()
         return [self._task(row) for row in rows]
 
     def get_task(self, user_id: str, task_id: str) -> MonitorTaskDetails | None:

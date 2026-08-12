@@ -41,6 +41,15 @@ def api_get(path: str) -> dict | list:
     return response.json()
 
 
+def restore_handoff_auth() -> None:
+    token = st.query_params.get("access_token")
+    server_id = st.query_params.get("server_id")
+    if token:
+        st.session_state.access_token = token
+        st.session_state.monitor_server_id = server_id
+        st.query_params.clear()
+
+
 def render_login() -> None:
     st.title("ShellMate Agent Monitor")
     st.write("Sign in to view your agent tasks and deployment progress.")
@@ -68,7 +77,11 @@ def _status_badge(status: str) -> str:
 
 @st.fragment(run_every="3s")
 def render_dashboard() -> None:
-    tasks = api_get("/monitor/tasks")
+    server_id = st.session_state.get("monitor_server_id")
+    task_path = "/monitor/tasks"
+    if server_id:
+        task_path += f"?server_id={server_id}"
+    tasks = api_get(task_path)
     if not tasks:
         st.info("No agent tasks have been recorded yet.")
         return
@@ -137,6 +150,7 @@ def render_dashboard() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="ShellMate Agent Monitor", page_icon="📊", layout="wide")
+    restore_handoff_auth()
     if "access_token" not in st.session_state:
         render_login()
         return
