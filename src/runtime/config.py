@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class RuntimeSettings(BaseSettings):
-    ollama_model: str = Field(default="minimax-m3:doud")
+    ollama_model: str = Field(default="minimax-m3:cloud")
     ollama_base_url: str = Field(default="https://ollama.com")
     ollama_api_key: str | None = None
     ollama_embedding_model: str = Field(default="nomic-embed-text")

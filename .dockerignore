@@ -10,3 +10,4 @@ backend/data
 evals/reports
 evals/evidently_workspace
 Dockerfile*
+*.md
