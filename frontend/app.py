@@ -64,7 +64,7 @@ def logout() -> None:
 
 @st.dialog("Welcome to ShellMate")
 def render_auth_dialog() -> None:
-    st.write("Sign in to manage your Linux servers, inspect live system information, and deploy safely.")
+    st.write("Sign in to manage your Linux servers")
     mode = st.radio(
         "Account access",
         options=["Login", "Create new"],
@@ -94,10 +94,7 @@ def render_auth_page() -> bool:
     _, content, _ = st.columns([1, 2, 1])
     with content:
         st.subheader("Your AI partner for Linux server operations")
-        st.write(
-            "Connect securely to your servers, understand what is happening in real time, "
-            "deploy applications through a guided workflow, and retrieve historical server activity."
-        )
+       
         if st.button("Get started", type="primary", use_container_width=False):
             render_auth_dialog()
     return False
@@ -505,7 +502,7 @@ def render_sidebar(servers: list[dict]) -> list[dict]:
 
     with st.sidebar:
         st.header("ShellMate")
-        st.caption("Connect a server, explore the environment, deploy safely, and build with chat.")
+        st.caption("Connect a server and build with chat.")
         if st.session_state.get("user_email"):
             st.caption(f"Signed in as {st.session_state.user_email}")
             if st.button("Logout", use_container_width=True):
@@ -554,10 +551,6 @@ def main() -> None:
         return
 
     st.title("ShellMate")
-    st.write(
-        "Your AI partner for Linux server operations, structured Docker deployments,"
-        " and static website building."
-    )
 
     try:
         servers = list_servers()

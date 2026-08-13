@@ -11,7 +11,9 @@ class SSHCommandTool:
             "name": "run_ssh_command",
             "description": (
                 "Run a Linux command on the currently connected server over SSH. "
-                "Use this when real server data is needed."
+                "Use this when real server data is needed or when executing an explicitly requested change. "
+                "The command's exit status and output are authoritative; changes must be followed by a separate "
+                "read-only verification command before reporting success."
             ),
             "parameters": {
                 "type": "object",

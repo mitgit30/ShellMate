@@ -49,7 +49,7 @@ services:
     profiles: ["evaluation"]
     build:
       context: .
-    dockerfile: backend/app/Dockerfile
+      dockerfile: backend/app/Dockerfile
     command: ["python", "-m", "evals.run_evaluation"]
     env_file:
       - .env
