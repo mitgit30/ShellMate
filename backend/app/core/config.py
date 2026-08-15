@@ -6,6 +6,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    database_url: str | None = Field(
+        default=None,
+        description="PostgreSQL URL. When unset, local SQLite files are used.",
+    )
     api_title: str = "Chat-Based Linux Server Manager"
     api_version: str = "0.1.0"
     frontend_api_base_url: str = Field(

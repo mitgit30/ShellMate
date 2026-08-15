@@ -22,13 +22,13 @@ class ServerService:
         self._key_storage_service = key_storage_service
         self._logger = logging.getLogger(__name__)
 
-    def list_servers(self, user_id: str) -> list[ServerResponse]:
+    def list_servers(self, user_id: str | None = None) -> list[ServerResponse]:
         return [
             ServerResponse.from_record(record)
             for record in self._server_repository.list(user_id)
         ]
 
-    def create_server(self, payload: ServerCreate, user_id: str) -> ServerResponse:
+    def create_server(self, payload: ServerCreate, user_id: str = "") -> ServerResponse:
         # Server IDs remain globally unique, even though reads are user-scoped.
         existing_server = self._server_repository.get_by_id(payload.id)
         if existing_server is not None:
@@ -49,7 +49,7 @@ class ServerService:
             port=payload.port,
             username=payload.username,
             private_key_path=private_key_path,
-            user_id=user_id,
+            user_id=user_id or None,
         )
         self._server_repository.add(record)
         self._logger.info("server_registered user_id=%s server_id=%s", user_id, record.id)

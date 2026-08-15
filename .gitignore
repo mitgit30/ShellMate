@@ -22,5 +22,5 @@ evals/reports/
 evals/evidently_workspace/
 !src/memory/
 !src/memory/*.py
-.env.example
+!.env.example
 docs

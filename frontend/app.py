@@ -33,6 +33,49 @@ def get_auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def friendly_api_error(exc: Exception, action: str = "Request") -> str:
+    """Convert backend/HTTP failures into concise, actionable UI messages."""
+    status_code: int | None = None
+    detail = ""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        try:
+            payload = exc.response.json()
+            detail_value = payload.get("detail", "") if isinstance(payload, dict) else ""
+            if isinstance(detail_value, list):
+                detail = "; ".join(
+                    str(item.get("msg", item)) if isinstance(item, dict) else str(item)
+                    for item in detail_value
+                )
+            else:
+                detail = str(detail_value or "")
+        except (ValueError, TypeError):
+            detail = exc.response.text.strip()
+    elif isinstance(exc, httpx.TimeoutException):
+        detail = "The backend request timed out."
+    elif isinstance(exc, httpx.ConnectError):
+        detail = "The backend could not be reached."
+    else:
+        detail = str(exc).strip()
+
+    lowered = detail.lower()
+    if "timed out" in lowered or "timeout" in lowered:
+        return f"{action} timed out. Check that the server is online and its SSH port is reachable."
+    if "authentication" in lowered or "publickey" in lowered or "permission denied" in lowered:
+        return f"{action} was rejected by the server. Check the username and private key."
+    if "private key" in lowered or "key file" in lowered:
+        return f"{action} could not use the private key. Upload the correct .pem key and try again."
+    if status_code == 401:
+        return "Your session has expired. Please log in again."
+    if status_code == 403:
+        return "You are not allowed to perform this action."
+    if status_code == 404:
+        return f"{action} could not find the requested resource."
+    if not detail:
+        return f"{action} failed. Please try again."
+    return f"{action} failed: {detail}"
+
+
 def authenticate(path: str, email: str, password: str) -> dict:
     settings = get_settings()
     response = httpx.post(
@@ -84,9 +127,9 @@ def render_auth_dialog() -> None:
             st.session_state.user_email = result["email"]
             st.rerun()
         except httpx.HTTPStatusError as exc:
-            st.error(exc.response.json().get("detail", "Authentication failed."))
+            st.error(friendly_api_error(exc, "Authentication"))
         except httpx.HTTPError as exc:
-            st.error(f"Backend is unreachable: {exc}")
+            st.error(friendly_api_error(exc, "Authentication"))
 
 
 def render_auth_page() -> bool:
@@ -355,9 +398,9 @@ def render_server_registry() -> None:
             st.session_state.active_view = "chat"
             st.rerun()
         except httpx.HTTPStatusError as exc:
-            st.error(f"Registration failed: {exc.response.text}")
+            st.error(friendly_api_error(exc, "Server registration"))
         except httpx.HTTPError as exc:
-            st.error(f"Backend is unreachable: {exc}")
+            st.error(friendly_api_error(exc, "Server registration"))
 
 
 def render_connection_panel(servers: list[dict]) -> None:
@@ -386,11 +429,11 @@ def render_connection_panel(servers: list[dict]) -> None:
         except httpx.HTTPStatusError as exc:
             st.session_state.connected_server_id = None
             st.session_state.connected_server_name = None
-            st.error(f"Connection test failed: {exc.response.text}")
+            st.error(friendly_api_error(exc, "Connection test"))
         except httpx.HTTPError as exc:
             st.session_state.connected_server_id = None
             st.session_state.connected_server_name = None
-            st.error(f"Backend is unreachable: {exc}")
+            st.error(friendly_api_error(exc, "Connection test"))
 
 
 def render_chat_sessions() -> None:
@@ -404,7 +447,7 @@ def render_chat_sessions() -> None:
             sessions = [create_chat_session(server_id)]
         st.session_state.chat_sessions = sessions
     except httpx.HTTPError as exc:
-        st.warning(f"Chat sessions could not be loaded: {exc}")
+        st.warning(friendly_api_error(exc, "Loading chat sessions"))
         return
 
     session_labels = {session["session_id"]: session["title"] for session in sessions}
@@ -438,7 +481,7 @@ def render_chat_sessions() -> None:
             load_chat_history(next_session["session_id"], server_id)
             st.rerun()
         except httpx.HTTPError as exc:
-            st.error(f"Chat could not be deleted: {exc}")
+            st.error(friendly_api_error(exc, "Deleting chat"))
 
 
 def render_chat_panel() -> None:
@@ -454,7 +497,7 @@ def render_chat_panel() -> None:
         try:
             prepare_chat_for_server(connected_server_id)
         except httpx.HTTPError as exc:
-            st.warning(f"Chat history could not be loaded: {exc}")
+            st.warning(friendly_api_error(exc, "Loading chat history"))
 
     st.caption(f"Connected server: {connected_server_name}")
     for message in st.session_state.chat_messages:
@@ -479,11 +522,11 @@ def render_chat_panel() -> None:
                 )
             )
     except httpx.HTTPStatusError as exc:
-        assistant_reply = f"Agent request failed: {exc.response.text}"
+        assistant_reply = friendly_api_error(exc, "Agent request")
         with st.chat_message("assistant"):
             st.markdown(assistant_reply)
     except httpx.HTTPError as exc:
-        assistant_reply = f"Backend is unreachable: {exc}"
+        assistant_reply = friendly_api_error(exc, "Agent request")
         with st.chat_message("assistant"):
             st.markdown(assistant_reply)
     except RuntimeError as exc:
@@ -565,7 +608,7 @@ def main() -> None:
             " http://localhost:8000 before using the UI.</div>",
             unsafe_allow_html=True,
         )
-        st.warning(f"API connection failed: {exc}")
+        st.warning(friendly_api_error(exc, "Loading ShellMate"))
 
     servers = render_sidebar(servers)
     render_main_content(servers)

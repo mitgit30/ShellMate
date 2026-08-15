@@ -1,24 +1,26 @@
 import re
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from backend.app.db.database import Database
 
 
 class ChatAnalyticsService:
     """Read-only account analytics for persisted conversations."""
 
-    def __init__(self, database_path: Path) -> None:
-        self._database_path = database_path
+    def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
+        self._database = database or Database(None, database_path or Path("backend/data/servers.db"))
+        self._database.initialize_schema()
 
     def count_user_messages(self, user_id: str, days: int) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        with sqlite3.connect(self._database_path) as connection:
+        with self._database.connect() as connection:
             row = connection.execute(
-                """SELECT COUNT(*) FROM chat_messages
+                """SELECT COUNT(*) AS count FROM chat_messages
                 WHERE user_id = ? AND role = 'user' AND created_at >= ?""",
                 (user_id, cutoff.isoformat()),
             ).fetchone()
-        return int(row[0]) if row else 0
+        return int(row["count"]) if row else 0
 
 
 def requested_chat_window(message: str) -> int | None:

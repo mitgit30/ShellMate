@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from backend.app.db.database import Database
 from src.memory.sqlite_store import SQLiteMemoryStore
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,12 @@ class MemoryManager:
         base_dir: Path | None = None,
         historical_memory_path: Path | None = None,
         historical_store: Any | None = None,
+        database: Database | None = None,
     ) -> None:
         project_root = Path(__file__).resolve().parents[2]
         if database_path is None:
             database_path = (base_dir / "memory.db") if base_dir else project_root / "backend" / "data" / "memory.db"
-        self._store = SQLiteMemoryStore(database_path)
+        self._store = SQLiteMemoryStore(database_path, database=database)
         self._historical_store = historical_store
         self._retrieval_events: dict[str, list[dict[str, str | int | None]]] = defaultdict(list)
         self._retrieval_events_lock = RLock()

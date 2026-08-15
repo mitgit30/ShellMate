@@ -1,23 +1,22 @@
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from backend.app.db.database import Database
 from backend.app.schemas.monitor import MonitorEvent, MonitorTask, MonitorTaskDetails
 
 
 class MonitorService:
     """Persists safe, user-scoped summaries of agent executions."""
 
-    def __init__(self, database_path: Path) -> None:
-        self._database_path = database_path
-        self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize_database()
+    def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
+        self._database = database or Database(None, database_path or Path("backend/data/servers.db"))
+        self._database.initialize_schema()
 
     def start_task(self, user_id: str, session_id: str, server_id: str, user_request: str) -> str:
         task_id = uuid4().hex
         now = _now()
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             connection.execute(
                 """INSERT INTO agent_tasks
                 (task_id, user_id, session_id, server_id, user_request, status, started_at)
@@ -44,7 +43,7 @@ class MonitorService:
         if not isinstance(exit_status, int):
             exit_status = None
 
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             current = connection.execute(
                 "SELECT status, deployment_status FROM agent_tasks WHERE task_id = ?",
                 (task_id,),
@@ -84,7 +83,7 @@ class MonitorService:
             connection.commit()
 
     def fail_task(self, task_id: str, message: str) -> None:
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             connection.execute(
                 """UPDATE agent_tasks
                 SET status = 'failed', error_message = ?, completed_at = ?
@@ -94,7 +93,7 @@ class MonitorService:
             connection.commit()
 
     def complete_task(self, task_id: str) -> None:
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             connection.execute(
                 """UPDATE agent_tasks SET status = 'completed', completed_at = ?
                 WHERE task_id = ? AND status = 'running'""",
@@ -103,7 +102,7 @@ class MonitorService:
             connection.commit()
 
     def list_tasks(self, user_id: str, server_id: str | None = None, limit: int = 25) -> list[MonitorTask]:
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             if server_id:
                 rows = connection.execute(
                     """SELECT * FROM agent_tasks WHERE user_id = ? AND server_id = ?
@@ -117,7 +116,7 @@ class MonitorService:
         return [self._task(row) for row in rows]
 
     def get_task(self, user_id: str, task_id: str) -> MonitorTaskDetails | None:
-        with self._connect() as connection:
+        with self._database.connect() as connection:
             task = connection.execute(
                 "SELECT * FROM agent_tasks WHERE task_id = ? AND user_id = ?",
                 (task_id, user_id),
@@ -130,54 +129,8 @@ class MonitorService:
             ).fetchall()
         return MonitorTaskDetails(task=self._task(task), events=[self._event(row) for row in events])
 
-    def _initialize_database(self) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS agent_tasks (
-                    task_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    server_id TEXT NOT NULL,
-                    user_request TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    current_skill TEXT,
-                    current_step TEXT,
-                    deployment_status TEXT NOT NULL DEFAULT 'not_applicable',
-                    started_at TEXT NOT NULL,
-                    completed_at TEXT,
-                    error_message TEXT
-                )"""
-            )
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS agent_events (
-                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id TEXT NOT NULL REFERENCES agent_tasks(task_id) ON DELETE CASCADE,
-                    event_type TEXT NOT NULL,
-                    detail TEXT,
-                    skill_id TEXT,
-                    step TEXT,
-                    tool_name TEXT,
-                    command TEXT,
-                    iteration INTEGER,
-                    exit_status INTEGER,
-                    created_at TEXT NOT NULL
-                )"""
-            )
-            columns = {row["name"] for row in connection.execute("PRAGMA table_info(agent_events)")}
-            if "command" not in columns:
-                connection.execute("ALTER TABLE agent_events ADD COLUMN command TEXT")
-            if "iteration" not in columns:
-                connection.execute("ALTER TABLE agent_events ADD COLUMN iteration INTEGER")
-            connection.commit()
-
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
-
     @staticmethod
-    def _task(row: sqlite3.Row) -> MonitorTask:
+    def _task(row) -> MonitorTask:
         return MonitorTask(
             task_id=row["task_id"], session_id=row["session_id"], server_id=row["server_id"],
             user_request=row["user_request"], status=row["status"],
@@ -187,7 +140,7 @@ class MonitorService:
         )
 
     @staticmethod
-    def _event(row: sqlite3.Row) -> MonitorEvent:
+    def _event(row) -> MonitorEvent:
         return MonitorEvent(
             event_id=row["event_id"], task_id=row["task_id"], event_type=row["event_type"],
             detail=row["detail"], skill_id=row["skill_id"], step=row["step"],

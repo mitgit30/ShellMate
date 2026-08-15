@@ -1,5 +1,6 @@
 from backend.app.core.config import get_settings
-from backend.app.repositories.server_repository import SQLiteServerRepository
+from backend.app.db.database import Database
+from backend.app.repositories.server_repository import DatabaseServerRepository
 from backend.app.services.key_storage_service import KeyStorageService
 from backend.app.services.server_service import ServerService
 from backend.app.services.ssh_service import SSHService
@@ -22,11 +23,13 @@ from backend.app.services.monitor_service import MonitorService
 from backend.app.services.chat_history_service import ChatHistoryService
 from backend.app.services.chat_analytics_service import ChatAnalyticsService
 settings = get_settings()
-server_repository = SQLiteServerRepository(settings.server_database_path)
-user_repository = UserRepository(settings.server_database_path)
-monitor_service = MonitorService(settings.server_database_path)
-chat_history_service = ChatHistoryService(settings.server_database_path)
-chat_analytics_service = ChatAnalyticsService(settings.server_database_path)
+database = Database(settings.database_url, settings.server_database_path)
+database.initialize_schema()
+server_repository = DatabaseServerRepository(database=database)
+user_repository = UserRepository(database=database)
+monitor_service = MonitorService(database=database)
+chat_history_service = ChatHistoryService(database=database)
+chat_analytics_service = ChatAnalyticsService(database=database)
 key_storage_service = KeyStorageService()
 server_service = ServerService(
     server_repository=server_repository,
@@ -38,6 +41,7 @@ model_client = OllamaModelClient()
 memory_manager = MemoryManager(
     database_path=settings.memory_database_path,
     historical_memory_path=settings.historical_memory_path,
+    database=database,
 )
 context_extractor = ContextExtractor(model_client=model_client, memory_manager=memory_manager)
 ssh_command_tool = SSHCommandTool(ssh_service=ssh_service)

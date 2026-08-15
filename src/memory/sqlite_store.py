@@ -1,80 +1,24 @@
-"""SQLite persistence for ShellMate server memory."""
+"""Persistence for ShellMate server memory."""
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.app.db.database import Database
 
 SCHEMA_VERSION = 1
 
 
 class SQLiteMemoryStore:
-    def __init__(self, database_path: Path) -> None:
-        self._database_path = database_path
-        self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+    def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
+        self._database = database or Database(None, database_path or Path("backend/data/memory.db"))
+        self._database.initialize_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        return connection
-
-    def _initialize(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS schema_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS memory_documents (
-                    server_id TEXT NOT NULL,
-                    document_type TEXT NOT NULL,
-                    content TEXT NOT NULL DEFAULT '',
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (server_id, document_type)
-                );
-
-                CREATE TABLE IF NOT EXISTS memory_facts (
-                    server_id TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    fact_key TEXT NOT NULL,
-                    value_json TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    confidence REAL NOT NULL DEFAULT 1.0,
-                    observed_at TEXT NOT NULL,
-                    expires_at TEXT,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (server_id, category, fact_key)
-                );
-
-                CREATE TABLE IF NOT EXISTS memory_observations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    server_id TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    observed_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_memory_facts_server_category
-                    ON memory_facts(server_id, category);
-                CREATE INDEX IF NOT EXISTS idx_memory_facts_expiry
-                    ON memory_facts(server_id, expires_at);
-                CREATE INDEX IF NOT EXISTS idx_memory_observations_server_time
-                    ON memory_observations(server_id, observed_at);
-                """
-            )
-            connection.execute(
-                "INSERT OR REPLACE INTO schema_metadata(key, value) VALUES (?, ?)",
-                ("schema_version", str(SCHEMA_VERSION)),
-            )
+    def _connect(self):
+        return self._database.connect()
 
     @staticmethod
     def _now() -> str:
