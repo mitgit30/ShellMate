@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.136.1",
     "httpx>=0.28.1",
     "langchain-chroma>=1.1.0",
+    "langchain-postgres>=0.0.14",
     "langchain-ollama>=1.1.0",
     "ollama>=0.5.1",
     "paramiko>=4.0.0",

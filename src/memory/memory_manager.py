@@ -1,6 +1,4 @@
-"""SQLite-backed server memory facade."""
 from __future__ import annotations
-
 import hashlib
 import logging
 from collections import defaultdict
@@ -16,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
-    """Application-facing memory API backed by SQLite."""
+    """Application-facing memory API with PostgreSQL/SQLite storage modes."""
 
     def __init__(
         self,
@@ -34,13 +32,16 @@ class MemoryManager:
         self._retrieval_events: dict[str, list[dict[str, str | int | None]]] = defaultdict(list)
         self._retrieval_events_lock = RLock()
         if self._historical_store is None and historical_memory_path is not None:
-            self._historical_store = self._create_historical_store(historical_memory_path)
+            self._historical_store = self._create_historical_store(
+                historical_memory_path,
+                database=database,
+            )
 
     @staticmethod
-    def _create_historical_store(path: Path):
+    def _create_historical_store(path: Path, database: Database | None = None):
         from src.memory.vector_store import HistoricalMemoryStore
 
-        return HistoricalMemoryStore(path)
+        return HistoricalMemoryStore(path, database=database)
 
     def read_handoff(self, server_id: str) -> str:
         return self._store.get_document(server_id, "handoff")
@@ -113,7 +114,7 @@ class MemoryManager:
                 session_id=session_id,
             )
         except Exception:
-            # Historical indexing must never break the primary agent turn.
+            
             logger.warning(
                 "historical_memory_index_failed server_id=%s source=%s session_id=%s",
                 server_id,
@@ -146,7 +147,8 @@ class MemoryManager:
                 date_label = ""
                 if date_from and date_to:
                     date_label = date_from.isoformat() if date_from == date_to else f"{date_from.isoformat()} to {date_to.isoformat()}"
-                detail = f"ChromaDB retrieved {len(results)} historical record(s)"
+                source = getattr(self._historical_store, "backend_name", "historical memory")
+                detail = f"{source} retrieved {len(results)} historical record(s)"
                 if date_label:
                     detail += f" for {date_label}"
                 elif not results:
@@ -155,7 +157,7 @@ class MemoryManager:
                     session_id,
                     {
                         "type": "historical_memory_retrieved",
-                        "source": "ChromaDB",
+                        "source": source,
                         "matches": len(results),
                         "date_from": date_from.isoformat() if date_from else None,
                         "date_to": date_to.isoformat() if date_to else None,
@@ -164,7 +166,6 @@ class MemoryManager:
                 )
             return results
         except Exception:
-            # A missing embedding model or unavailable Chroma must not block chat.
             logger.warning(
                 "historical_memory_search_failed server_id=%s date_from=%s date_to=%s",
                 server_id,
@@ -177,9 +178,9 @@ class MemoryManager:
                     session_id,
                     {
                         "type": "historical_memory_unavailable",
-                        "source": "ChromaDB",
+                        "source": getattr(self._historical_store, "backend_name", "historical memory"),
                         "matches": 0,
-                        "detail": "ChromaDB historical memory was unavailable for this request.",
+                        "detail": "Historical memory was unavailable for this request.",
                     },
                 )
             return []

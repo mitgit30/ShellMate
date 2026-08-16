@@ -13,4 +13,5 @@ evidently
 pytest
 langchain-ollama
 langchain-chroma
+langchain-postgres
 chromadb

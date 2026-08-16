@@ -5,24 +5,37 @@ import hashlib
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
+from backend.app.db.database import Database
 from src.runtime.config import get_runtime_settings
 
 
 class HistoricalMemoryStore:
-    """Store concise, server-scoped historical summaries in ChromaDB."""
 
     _MAX_CONTENT_LENGTH = 4_000
 
-    def __init__(self, persist_directory: Path) -> None:
+    def __init__(
+        self,
+        persist_directory: Path,
+        database: Database | None = None,
+    ) -> None:
         self._persist_directory = persist_directory
+        self._database = database
         self._store = None
+
+    @property
+    def backend_name(self) -> str:
+        return "PostgreSQL pgvector" if self._uses_postgres else "ChromaDB"
+
+    @property
+    def _uses_postgres(self) -> bool:
+        return bool(self._database and self._database.is_postgres)
 
     def _get_store(self):
         if self._store is not None:
             return self._store
 
-        from langchain_chroma import Chroma
         from langchain_ollama import OllamaEmbeddings
 
         settings = get_runtime_settings()
@@ -40,12 +53,35 @@ class HistoricalMemoryStore:
             base_url=settings.ollama_base_url,
             client_kwargs=client_kwargs,
         )
-        self._store = Chroma(
-            collection_name="shellmate_historical_memory",
-            embedding_function=embeddings,
-            persist_directory=str(self._persist_directory),
-        )
+        if self._uses_postgres:
+            self._store = self._create_pgvector_store(embeddings)
+        else:
+            from langchain_chroma import Chroma
+
+            self._store = Chroma(
+                collection_name="shellmate_historical_memory",
+                embedding_function=embeddings,
+                persist_directory=str(self._persist_directory),
+            )
         return self._store
+
+    def _create_pgvector_store(self, embeddings: Any):
+        if not self._database:
+            raise RuntimeError("PostgreSQL vector storage requires a database configuration.")
+
+        
+        with self._database.connect() as connection:
+            connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+        from langchain_postgres import PGVector
+
+        database_url = self._database.engine.url.render_as_string(hide_password=False)
+        return PGVector(
+            embeddings=embeddings,
+            collection_name="shellmate_historical_memory",
+            connection=database_url,
+            use_jsonb=True,
+        )
 
     def add_summary(
         self,
@@ -88,9 +124,6 @@ class HistoricalMemoryStore:
         if not cleaned_query:
             return []
 
-        # Retrieve a bounded candidate set for the server, then apply the date
-        # range in Python. This also supports records created before the
-        # explicit ``observed_date`` metadata field was introduced.
         results = self._get_store().similarity_search(
             cleaned_query,
             k=max(1, min(limit * 10, 50)),
