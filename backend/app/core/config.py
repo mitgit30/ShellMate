@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     ssh_command_timeout_seconds: int = Field(default=20, ge=1, le=300)
     ssh_key_storage_dir: Path = Field(default=Path("backend/data/keys"))
     ssh_key_max_size_bytes: int = Field(default=64 * 1024, ge=1024, le=1024 * 1024)
+    key_vault_url: str | None = Field(
+        default=None,
+        description="Azure Key Vault URL, when it is set, SSH keys are stored in Key Vault.",
+    )
+    key_vault_secret_prefix: str = Field(default="shellmate-ssh", min_length=1, max_length=40)
     server_database_path: Path = Field(default=Path("backend/data/servers.db"))
     memory_database_path: Path = Field(default=Path("backend/data/memory.db"))
     historical_memory_path: Path = Field(default=Path("backend/data/chroma"))

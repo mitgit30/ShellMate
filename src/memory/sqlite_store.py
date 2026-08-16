@@ -15,7 +15,8 @@ SCHEMA_VERSION = 1
 class SQLiteMemoryStore:
     def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
         self._database = database or Database(None, database_path or Path("backend/data/memory.db"))
-        self._database.initialize_schema()
+        if database is None:
+            self._database.initialize_schema()
 
     def _connect(self):
         return self._database.connect()

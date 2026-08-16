@@ -15,3 +15,5 @@ langchain-ollama
 langchain-chroma
 langchain-postgres
 chromadb
+azure-identity
+azure-keyvault-secrets

@@ -58,7 +58,8 @@ class SQLiteServerRepository:
 
     def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
         self._database = database or Database(None, database_path or Path("backend/data/servers.db"))
-        self._database.initialize_schema()
+        if database is None:
+            self._database.initialize_schema()
 
     def list(self, user_id: str | None = None) -> Iterable[ServerRecord]:
         with self._database.connect() as connection:

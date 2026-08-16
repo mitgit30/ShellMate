@@ -75,12 +75,17 @@ class DatabaseConnection:
 
 class Database:
     def __init__(self, database_url: str | None, sqlite_path: Path) -> None:
+        self._schema_initialized = False
+        self._initializing_schema = False
         self.is_postgres = bool(database_url and database_url.startswith(("postgresql", "postgres")))
         if database_url:
+            connect_args = {} if "connect_timeout=" in database_url else {"connect_timeout": 5}
             self.engine: Engine = create_engine(
                 database_url,
                 pool_pre_ping=True,
                 pool_recycle=1800,
+                pool_timeout=10,
+                connect_args=connect_args,
             )
         else:
             sqlite_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,14 +96,22 @@ class Database:
             )
 
     def connect(self) -> DatabaseConnection:
+        # Retry schema initialization lazily after a transient startup outage.
+        # This lets the API recover when PostgreSQL is started after the backend.
+        if not self._schema_initialized and not self._initializing_schema:
+            self.initialize_schema()
         return DatabaseConnection(self.engine.connect(), self.is_postgres)
 
     def initialize_schema(self) -> None:
+        if self._schema_initialized:
+            return
+        self._initializing_schema = True
         identity = "BIGSERIAL" if self.is_postgres else "INTEGER"
         auto_suffix = "" if self.is_postgres else " AUTOINCREMENT"
-        with self.connect() as connection:
-            connection.executescript(
-                f"""
+        try:
+            with DatabaseConnection(self.engine.connect(), self.is_postgres) as connection:
+                connection.executescript(
+                    f"""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
                     email TEXT NOT NULL UNIQUE,
@@ -206,9 +219,12 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_memory_observations_server_time
                     ON memory_observations(server_id, observed_at);
                 """
-            )
-            connection.execute(
-                "INSERT INTO schema_metadata(key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                ("schema_version", "2"),
-            )
+                )
+                connection.execute(
+                    "INSERT INTO schema_metadata(key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ("schema_version", "2"),
+                )
+            self._schema_initialized = True
+        finally:
+            self._initializing_schema = False

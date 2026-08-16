@@ -5,17 +5,23 @@ from pathlib import Path
 import paramiko
 
 from backend.app.core.config import get_settings
-from backend.app.core.exceptions import SSHConnectionError
+from backend.app.core.exceptions import InvalidKeyUploadError, SSHConnectionError
 from backend.app.schemas.command import CommandExecutionResponse
 from backend.app.schemas.session import SSHSessionResponse
+from backend.app.services.key_storage_service import KeyStorageService
 from backend.app.services.server_service import ServerService
 
 logger = logging.getLogger(__name__)
 
 
 class SSHService:
-    def __init__(self, server_service: ServerService) -> None:
+    def __init__(
+        self,
+        server_service: ServerService,
+        key_storage_service: KeyStorageService | None = None,
+    ) -> None:
         self._server_service = server_service
+        self._key_storage_service = key_storage_service
         self._settings = get_settings()
 
     def open_session(self, server_id: str) -> SSHSessionResponse:
@@ -80,16 +86,6 @@ class SSHService:
 
     def _connect(self, client: paramiko.SSHClient, server) -> None:
         try:
-            key_path = Path(server.private_key_path)
-            if not key_path.exists():
-                local_key_path = self._settings.ssh_key_storage_dir / key_path.name
-                if local_key_path.exists():
-                    key_path = local_key_path
-                else:
-                    raise SSHConnectionError(
-                        f"Private key file for server '{server.id}' was not found."
-                    )
-
             connect_kwargs = {
                 "hostname": server.host,
                 "port": server.port,
@@ -97,10 +93,29 @@ class SSHService:
                 "timeout": 10,
                 "look_for_keys": False,
                 "allow_agent": False,
-                "key_filename": str(key_path),
             }
+            if self._key_storage_service is None:
+                key_path = Path(server.private_key_path)
+                if not key_path.exists():
+                    raise SSHConnectionError(
+                        f"Private key file for server '{server.id}' was not found."
+                    )
+                connect_kwargs["key_filename"] = str(key_path)
+                client.connect(**connect_kwargs)
+                return
 
-            client.connect(**connect_kwargs)
+            with self._key_storage_service.materialize_key(server.private_key_path) as key_path:
+                logger.info(
+                    "ssh_key_source server_id=%s backend=%s",
+                    server.id,
+                    self._key_storage_service.storage_backend_for(server.private_key_path),
+                )
+                connect_kwargs["key_filename"] = str(key_path)
+                client.connect(**connect_kwargs)
+        except InvalidKeyUploadError as exc:
+            raise SSHConnectionError(
+                f"SSH key for server '{server.id}' is unavailable."
+            ) from exc
         except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
             raise SSHConnectionError(
                 f"Unable to establish SSH connection to '{server.id}': {exc}"

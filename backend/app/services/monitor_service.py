@@ -11,7 +11,8 @@ class MonitorService:
 
     def __init__(self, database_path: Path | None = None, database: Database | None = None) -> None:
         self._database = database or Database(None, database_path or Path("backend/data/servers.db"))
-        self._database.initialize_schema()
+        if database is None:
+            self._database.initialize_schema()
 
     def start_task(self, user_id: str, session_id: str, server_id: str, user_request: str) -> str:
         task_id = uuid4().hex

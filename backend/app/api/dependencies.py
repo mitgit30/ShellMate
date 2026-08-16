@@ -1,3 +1,5 @@
+import logging
+
 from backend.app.core.config import get_settings
 from backend.app.db.database import Database
 from backend.app.repositories.server_repository import DatabaseServerRepository
@@ -22,9 +24,18 @@ from backend.app.repositories.user_repository import UserRepository
 from backend.app.services.monitor_service import MonitorService
 from backend.app.services.chat_history_service import ChatHistoryService
 from backend.app.services.chat_analytics_service import ChatAnalyticsService
+
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 database = Database(settings.database_url, settings.server_database_path)
-database.initialize_schema()
+try:
+    database.initialize_schema()
+except Exception:
+    logger.exception(
+        "database_startup_unavailable backend=%s",
+        "postgresql" if database.is_postgres else "sqlite",
+    )
 server_repository = DatabaseServerRepository(database=database)
 user_repository = UserRepository(database=database)
 monitor_service = MonitorService(database=database)
@@ -35,7 +46,10 @@ server_service = ServerService(
     server_repository=server_repository,
     key_storage_service=key_storage_service,
 )
-ssh_service = SSHService(server_service=server_service)
+ssh_service = SSHService(
+    server_service=server_service,
+    key_storage_service=key_storage_service,
+)
 session_store = InMemorySessionStore()
 model_client = OllamaModelClient()
 memory_manager = MemoryManager(

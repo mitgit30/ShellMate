@@ -38,7 +38,7 @@ class ServerService:
 
         private_key_path = payload.private_key_path
         if payload.key_id and self._key_storage_service:
-            private_key_path = str(self._key_storage_service.resolve_key_path(payload.key_id))
+            private_key_path = self._key_storage_service.validate_key_reference(payload.key_id)
         if not private_key_path:
             raise ValueError("A valid SSH key is required.")
 
@@ -65,9 +65,8 @@ class ServerService:
 
         record = self._get_server_record(server_id, user_id)
         new_key = await self._key_storage_service.store_uploaded_key(uploaded_file)
-        new_path = self._key_storage_service.resolve_key_path(new_key.key_id)
         try:
-            self._server_repository.update_key(server_id, str(new_path))
+            self._server_repository.update_key(server_id, new_key.key_id)
         except Exception:
             self._key_storage_service.delete_key(new_key.key_id)
             raise
