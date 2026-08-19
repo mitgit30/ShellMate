@@ -64,7 +64,7 @@ class ChatHistoryService:
                 (user_id, server_id),
             ).fetchall()
             connection.commit()
-        return [dict(row) for row in rows]
+        return [_serialize_session(dict(row)) for row in rows]
 
     def get_session(self, user_id: str, session_id: str, server_id: str) -> dict:
         with self._database.connect() as connection:
@@ -75,7 +75,7 @@ class ChatHistoryService:
             ).fetchone()
         if row is None:
             raise ValueError("Chat session was not found.")
-        return dict(row)
+        return _serialize_session(dict(row))
 
     def set_title(self, user_id: str, session_id: str, server_id: str, title: str) -> None:
         with self._database.connect() as connection:
@@ -115,7 +115,30 @@ class ChatHistoryService:
                 ORDER BY message_id""",
                 (user_id, session_id, server_id),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [_serialize_message(dict(row)) for row in rows]
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _serialize_session(session: dict) -> dict:
+    for field in ("created_at", "updated_at"):
+        session[field] = _timestamp_to_iso(session.get(field))
+    return session
+
+
+def _serialize_message(message: dict) -> dict:
+    message["created_at"] = _timestamp_to_iso(message.get("created_at"))
+    return message
+
+
+def _timestamp_to_iso(value) -> str:
+    """Return a consistent ISO-8601 string for SQLite and PostgreSQL values."""
+    if isinstance(value, datetime):
+        normalized = value
+        if normalized.tzinfo is None:
+            normalized = normalized.replace(tzinfo=timezone.utc)
+        else:
+            normalized = normalized.astimezone(timezone.utc)
+        return normalized.isoformat()
+    return str(value) if value is not None else ""

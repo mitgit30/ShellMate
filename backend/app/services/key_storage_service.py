@@ -48,6 +48,7 @@ class KeyStorageService:
             try:
                 self._get_key_vault_client().get_secret(key_id)
             except Exception as exc:
+                logger.exception("azure_key_vault_validate_secret_failed key_id=%s", key_id)
                 raise InvalidKeyUploadError("SSH key was not found.") from exc
             return key_id
 
@@ -67,6 +68,7 @@ class KeyStorageService:
             raise InvalidKeyUploadError("SSH key was not found.")
         return key_path.resolve()
 
+    @contextmanager
     def materialize_key(self, key_reference: str) -> Iterator[Path]:
         if not self.uses_key_vault or self._looks_like_local_key(key_reference):
             yield self._resolve_legacy_local_path(key_reference)
@@ -98,6 +100,7 @@ class KeyStorageService:
             try:
                 self._get_key_vault_client().begin_delete_secret(key_id)
             except Exception as exc:
+                logger.exception("azure_key_vault_delete_failed key_id=%s", key_id)
                 raise InvalidKeyUploadError("SSH key could not be deleted.") from exc
             logger.info("ssh_key_deleted backend=azure_key_vault key_id=%s", key_id)
             return
@@ -151,6 +154,7 @@ class KeyStorageService:
         try:
             self._get_key_vault_client().set_secret(key_id, key_value)
         except Exception as exc:
+            logger.exception("azure_key_vault_set_secret_failed key_id=%s", key_id)
             raise InvalidKeyUploadError("The SSH key could not be stored in Azure Key Vault.") from exc
         logger.info("ssh_key_stored backend=azure_key_vault key_id=%s", key_id)
         return key_id
@@ -161,6 +165,7 @@ class KeyStorageService:
         try:
             value = self._get_key_vault_client().get_secret(key_id).value
         except Exception as exc:
+            logger.exception("azure_key_vault_get_secret_failed key_id=%s", key_id)
             raise InvalidKeyUploadError("SSH key was not found in Azure Key Vault.") from exc
         if not value:
             raise InvalidKeyUploadError("SSH key value is empty.")
@@ -171,13 +176,29 @@ class KeyStorageService:
         if self._key_vault_client is None:
             if not self._settings.key_vault_url:
                 raise InvalidKeyUploadError("Azure Key Vault is not configured.")
-            from azure.identity import DefaultAzureCredential
             from azure.keyvault.secrets import SecretClient
+
+            if self._settings.azure_use_managed_identity:
+                from azure.identity import ManagedIdentityCredential
+
+                credential = ManagedIdentityCredential()
+                credential_mode = "managed_identity"
+            else:
+                from azure.identity import DefaultAzureCredential
+
+                # Local mode supports Azure CLI, environment credentials, or
+                # another developer credential, but never probes managed
+                # identity outside Azure hosting.
+                credential = DefaultAzureCredential(
+                    exclude_managed_identity_credential=True,
+                )
+                credential_mode = "local_default_without_managed_identity"
 
             self._key_vault_client = SecretClient(
                 vault_url=self._settings.key_vault_url,
-                credential=DefaultAzureCredential(),
+                credential=credential,
             )
+            logger.info("azure_key_vault_client_created credential=%s", credential_mode)
         return self._key_vault_client
 
     def _resolve_legacy_local_path(self, key_reference: str) -> Path:

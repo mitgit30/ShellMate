@@ -42,7 +42,6 @@ def register(payload: RegisterRequest) -> LoginResponse:
     except ValueError as exc:
         logger.warning("auth_account_creation_rejected email=%s", payload.email.strip().lower())
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    # Assign legacy unowned records to the first account created after migration.
     server_repository.assign_unowned_servers(user.id)
     logger.info("auth_account_created user_id=%s", user.id)
     return _issue_token(user)

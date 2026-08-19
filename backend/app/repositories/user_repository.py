@@ -4,6 +4,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from backend.app.db.database import Database
 
@@ -87,7 +88,8 @@ class UserRepository:
                 """,
                 (hash_token(raw_token),),
             ).fetchone()
-        if row is None or datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+        expires_at = _parse_database_datetime(row["expires_at"]) if row else None
+        if row is None or expires_at is None or expires_at <= datetime.now(timezone.utc):
             return None
         return User(id=row["id"], email=row["email"])
 
@@ -120,3 +122,20 @@ def verify_password(password: str, encoded: str) -> bool:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _parse_database_datetime(value: Any) -> datetime | None:
+    """Normalize SQLite text and PostgreSQL datetime values to UTC."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

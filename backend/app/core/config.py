@@ -26,6 +26,10 @@ class Settings(BaseSettings):
         description="Azure Key Vault URL, when it is set, SSH keys are stored in Key Vault.",
     )
     key_vault_secret_prefix: str = Field(default="shellmate-ssh", min_length=1, max_length=40)
+    azure_use_managed_identity: bool = Field(
+        default=False,
+        description="Use Azure managed identity for Key Vault access in Azure hosting.",
+    )
     server_database_path: Path = Field(default=Path("backend/data/servers.db"))
     memory_database_path: Path = Field(default=Path("backend/data/memory.db"))
     historical_memory_path: Path = Field(default=Path("backend/data/chroma"))
