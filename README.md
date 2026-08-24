@@ -1,16 +1,16 @@
 # ShellMate
 
-ShellMate is an AI-assisted Linux server operations platform designed to execute diagnostics, structured deployments, and creative file generation. It is built around three operating pillars, a decoupled four-tier runtime architecture, and a secure hybrid memory engine.
+ShellMate is a Linux server ops tool that uses an LLM to run diagnostics, handle structured deployments, and generate simple static sites. It's built around three separate operating pillars, a four-layer runtime, and a hybrid memory system that mixes SQLite state with vector search.
 
 ---
 
 ## Technology Stack
 
-* **Frontend**: Streamlit (NDJSON-streamed token visualization)
+* **Frontend**: Streamlit (streams tokens over NDJSON)
 * **Backend**: FastAPI, Pydantic, Uvicorn
-* **Agentic Runtime**: Python-native ReAct/Pipeline runtime, Ollama Client
+* **Agentic Runtime**: Python ReAct/pipeline runtime, Ollama Client
 * **LLM Models**: Configurable Ollama Cloud chat and embedding models
-* **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
+* **Database & Memory**: SQLite3 for live state, Chroma DB for semantic search
 * **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI
 * **Orchestration Tooling**: LangChain Core / LangChain Chroma
 
@@ -18,32 +18,32 @@ ShellMate is an AI-assisted Linux server operations platform designed to execute
 
 ## 1. Operating Pillars
 
-ShellMate separates operations into three distinct pillars to isolate flexible diagnostics from safety-critical mutations:
+ShellMate keeps flexible, read-only diagnostics separate from anything that mutates a server. That split happens across three pillars:
 
 * **Pillar 1: Day-to-Day Server Management (`SSHSkill`)**
-  * *Purpose*: Conversational diagnostics (disk usage, memory statistics, port status, process audits, log inspection).
-  * *Execution*: An interactive ReAct (Reasoning and Acting) loop that executes remote, read-only terminal commands via SSH (Paramiko) and translates raw logs/data into clean summaries.
-  * *Safety Guardrails*: Programmatically prompted to never execute changes or destructive commands (e.g., service restarts, package changes) without explicit user confirmation.
+  * *What it does*: Handles conversational diagnostics — disk usage, memory stats, port status, process audits, log inspection.
+  * *How*: Runs a ReAct loop that executes read-only commands over SSH (via Paramiko) and turns raw output into a readable summary.
+  * *Guardrails*: The prompt instructs it never to run changes or destructive commands (service restarts, package installs, etc.) without the user confirming first.
 
 * **Pillar 2: Structured Deployment Engine (`DeploymentSkill`)**
-  * *Purpose*: Orchestrates Docker and Docker Compose infrastructure mutations.
-  * *Execution*: A deterministic, rule-based pipeline running through fixed operational stages: `Validate` -> `Gather` -> `Generate` -> `Approval` -> `Execute` -> `Verify` -> `Summary`. 
-  * *Safety Guardrails*: The LLM interprets parameters, handles verification outputs, and designs configurations, but the pipeline execution structure and approval checkpoints are strictly controlled code gates.
+  * *What it does*: Handles Docker and Docker Compose deployments.
+  * *How*: A fixed, rule-based pipeline: `Validate` → `Gather` → `Generate` → `Approval` → `Execute` → `Verify` → `Summary`.
+  * *Guardrails*: The LLM fills in parameters, reads verification output, and writes configs, but the pipeline stages and approval checkpoints themselves are hard-coded, not something the model can skip.
 
 * **Pillar 3: Generative Web Page Builder (`BuilderSkill`)**
-  * *Purpose*: Generates visual static site assets (HTML, CSS, JS) grounded in custom style choices.
-  * *Execution*: Conversational discovery to resolve visual specifications, followed by structured asset generation written directly to the target directory on the remote server via the `BuilderTool`.
+  * *What it does*: Generates static site assets (HTML, CSS, JS) based on style choices the user gives it.
+  * *How*: A short back-and-forth to pin down the visual spec, then the `BuilderTool` writes the generated files directly to the target directory on the remote server.
 
 ---
 
 ## 2. System Architecture
 
-The codebase is organized into four decoupled layers:
+The codebase has four layers:
 
-1. **Frontend Layer (Streamlit)**: Operates as the user control panel, receiving user inputs and displaying real-time agent status, command executions, and streamed assistant tokens.
-2. **Control API Layer (FastAPI)**: Serves HTTP endpoints for registered Linux hosts, credential/key storage, active web sessions, and agent turns.
-3. **Runtime Engine Layer (Python)**: Orchestrates routing via `SkillRouter`, executes selected pillars, manages state, and triggers silent context extraction.
-4. **Execution Layer (Paramiko / Tools)**: Runs low-level SSH sessions on target nodes, runs Docker execution pipelines, and manages local asset creation.
+1. **Frontend (Streamlit)**: The control panel — takes user input, shows agent status, command output, and streamed tokens.
+2. **Control API (FastAPI)**: HTTP endpoints for registered hosts, credentials/keys, active sessions, and agent turns.
+3. **Runtime Engine (Python)**: Routes requests via `SkillRouter`, runs the selected pillar, manages state, and triggers context extraction in the background.
+4. **Execution Layer (Paramiko / Tools)**: Runs the actual SSH sessions, drives the Docker pipeline, and writes generated assets.
 
 ```text
 +-------------------------------------------------------+
@@ -58,13 +58,13 @@ The codebase is organized into four decoupled layers:
                            v
 +-------------------------------------------------------+
 |                    RUNTIME ENGINE                     |  <- Routing & Orchestration
-|   ServerOpsAgent, SkillRouter, ContextExtractor      |
+|   ServerOpsAgent, SkillRouter, ContextExtractor        |
 +--------------------------+----------------------------+
                            | Operations & Mutations
                            v
 +-------------------------------------------------------+
 |                    EXECUTION LAYER                    |  <- Target Node Execution
-|   SSH (Paramiko), Docker Pipeline, Builder Tools      |
+|   SSH (Paramiko), Docker Pipeline, Builder Tools       |
 +-------------------------------------------------------+
 ```
 
@@ -72,41 +72,41 @@ The codebase is organized into four decoupled layers:
 
 ## 3. The Hybrid Memory Architecture
 
-ShellMate implements a stateful and semantic memory layer managed by the `MemoryManager`, keeping prompt contexts light and isolating long-term knowledge from short-term conversation.
+Memory is split into a fast, accurate state store and a semantic historical store, managed by `MemoryManager`. This keeps prompts short while still letting the agent recall past sessions when it needs to.
 
 ```text
                +----------------------------------------+
-               |             MemoryManager              |
+               |             MemoryManager               |
                +-------------------+--------------------+
                                    |
                   +----------------+----------------+
                   |                                 |
                   v                                 v
    +-----------------------------+   +-----------------------------+
-   |     SQLite Memory Store     |   |   Vector Historical Store   |
-   |  - memory_documents         |   |  - Chroma DB Backend        |
-   |  - memory_facts (Upserted)  |   |  - nomic-embed-text         |
-   |  - memory_observations      |   |  - Secret Sanitizer         |
+   |     SQLite Memory Store      |   |   Vector Historical Store    |
+   |  - memory_documents          |   |  - Chroma DB Backend         |
+   |  - memory_facts (Upserted)   |   |  - nomic-embed-text          |
+   |  - memory_observations       |   |  - Secret Sanitizer          |
    +-----------------------------+   +-----------------------------+
 ```
 
 ### 3.1. Real-Time State: SQLite Memory Store
-Active system parameters are recorded in SQLite (`backend/data/memory.db`) to ensure the agent receives a single, accurate, non-contradictory state:
-* **`memory_documents`**: Stores the latest session state and latest inter-skill handoff description per server. It is not the complete historical summary archive.
-* **`memory_facts`**: Stores categories like `Paths`, `Packages`, `Ports`, and `Containers`. Facts are matched using a hash of the content and saved using an upsert (`ON CONFLICT DO UPDATE`) operation, preventing port conflict hallucinations.
-* **`memory_observations`**: Tracks transaction payloads and observation event history.
+Current system state lives in SQLite (`backend/data/memory.db`), so the agent always works off one consistent, non-contradictory picture:
+* **`memory_documents`**: The latest session state and the latest handoff description between skills, per server. Not a full historical log — just the current snapshot.
+* **`memory_facts`**: Categorized facts (`Paths`, `Packages`, `Ports`, `Containers`). Matched by a content hash and upserted (`ON CONFLICT DO UPDATE`), so the agent doesn't hallucinate stale port assignments.
+* **`memory_observations`**: Transaction payloads and the history of observation events.
 
 ### 3.2. Semantic Context: Chroma Vector DB
-Historical execution summaries are stored semantically to inform the agent of past server actions across sessions:
-* **Vector Store**: Uses Chroma DB through LangChain and the configured Ollama Cloud embedding model.
-* **Indexing**: After a completed turn produces a useful handoff, the summary is sanitized and indexed once. New summaries receive new embeddings; existing summaries are not re-embedded on every request.
-* **Secret Redaction**: Raw agent summaries are parsed by an automated regex-based sanitizer before embedding, redacting SSH private keys and masking credentials to prevent vector leakages.
-* **Server Scoping**: Vector queries are filtered by metadata attributes (`server_id`, `session_id`, `observed_date`) to guarantee complete process isolation between target nodes.
+Past execution summaries are stored semantically so the agent can pull in relevant history from earlier sessions:
+* **Vector Store**: Chroma DB via LangChain, using the configured Ollama Cloud embedding model.
+* **Indexing**: Once a turn produces a useful handoff summary, it gets sanitized and embedded a single time. Existing summaries aren't re-embedded on later requests.
+* **Secret Redaction**: A regex-based sanitizer strips SSH private keys and masks credentials before anything gets embedded, so secrets don't end up in the vector store.
+* **Server Scoping**: Queries are filtered by `server_id`, `session_id`, and `observed_date`, so results from one server never leak into another.
 
 ### 3.3. Prompt Composition & Date-Aware Heuristics
-* The `PromptComposer` automatically scans user requests for historical keywords (*previously, earlier, history, ago, last time*).
-* It decodes relative and absolute temporal queries (e.g., *"yesterday"*, *"3 days ago"*) into calendar dates.
-* Date-bounded queries are semantic-searched against Chroma and injected under. If no entries are found, a strict instruction is appended (`Do not invent activity for this date range`) to prevent LLM hallucinations.
+* `PromptComposer` scans incoming requests for historical keywords (*previously, earlier, history, ago, last time*).
+* It resolves relative and absolute date references (*"yesterday"*, *"3 days ago"*) into actual calendar dates.
+* Date-bounded queries get run against Chroma. If nothing matches, the prompt is given an explicit instruction not to invent activity for that range.
 
 ---
 
@@ -118,7 +118,7 @@ Historical execution summaries are stored semantically to inform the agent of pa
 * Target Linux nodes with SSH access
 
 ### 4.2. Model Configuration
-Configure the model endpoint and credentials in `.env`:
+Set the model endpoint and credentials in `.env`:
 ```bash
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your-ollama-cloud-key
@@ -127,50 +127,49 @@ OLLAMA_EMBEDDING_MODEL=your-embedding-model
 CORS_ALLOWED_ORIGINS=http://localhost:8501
 ```
 
-The application uses one shared SQLite database. Users are stored in `users`, and
-registered servers are scoped with `servers.user_id`; it does not create a separate
-database file per user. Create an account through `POST /api/v1/auth/register` or
-the frontend's **Create new** button. Passwords are stored as scrypt hashes, never
-as plaintext. Existing legacy servers without an owner are assigned to the first
-account created after this migration.
+There's one shared SQLite database for the whole app. Users live in `users`, and
+servers are scoped by `servers.user_id` — there's no per-user database file. Create
+an account through `POST /api/v1/auth/register` or the frontend's **Create new**
+button. Passwords are stored as scrypt hashes, never plaintext. Legacy servers with
+no owner get assigned to the first account created after this migration.
 
 ### 4.3. Starting the Backend (FastAPI)
-The backend manages SSH communication, database operations, and proxy streaming.
+Handles SSH communication, database operations, and proxy streaming.
 ```bash
-# Navigate to project root
+# From the project root
 uv run uvicorn backend.app.main:app --reload
 ```
-By default, the backend runs on [http://localhost:8000](http://localhost:8000).
+Runs on [http://localhost:8000](http://localhost:8000) by default.
 
 ### 4.4. Starting the Frontend (Streamlit)
-The frontend serves the chat interface.
+Serves the chat interface.
 ```bash
 uv run streamlit run frontend/app.py
 ```
-By default, the frontend runs on [http://localhost:8501](http://localhost:8501).
+Runs on [http://localhost:8501](http://localhost:8501) by default.
 
 ### 4.5. Memory Migration (Legacy Data)
-If you have legacy Markdown files in `memory/{server_id}`, run the migration utility to parse and load them into SQLite:
+If you've got old Markdown files under `memory/{server_id}`, migrate them into SQLite with:
 ```bash
 uv run python -m src.memory.migrate_markdown --source memory --database backend/data/memory.db
 ```
 
 ### 4.6. Running Unit Tests
-Unit tests verify routing accuracy, prompt assembly, database mutations, and secret sanitization.
+Tests cover routing accuracy, prompt assembly, database mutations, and secret sanitization.
 ```bash
 uv run pytest
 ```
 
 ### 4.7. Running with Docker Compose
-Build and start the frontend and backend containers:
+Build and start both containers:
 
 ```bash
 docker compose up --build -d
 ```
 
-The Compose setup persists SQLite, ChromaDB, SSH keys, and logs through host-mounted directories. The `.env` file is injected as configuration and excluded from Docker images.
+SQLite, ChromaDB, SSH keys, and logs persist through host-mounted volumes. `.env` is injected at runtime and excluded from the images.
 
-Run the optional Evidently evaluation job separately:
+To run the optional Evidently evaluation job separately:
 
 ```bash
 docker compose --profile evaluation run --rm evaluation
