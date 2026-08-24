@@ -11,7 +11,7 @@ ShellMate is an AI-assisted Linux server operations platform designed to execute
 * **Agentic Runtime**: Python-native ReAct/Pipeline runtime, Ollama Client
 * **LLM Models**: Configurable Ollama Cloud chat and embedding models
 * **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
-* **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI
+* **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI.
 * **Orchestration Tooling**: LangChain Core / LangChain Chroma
 
 ---
