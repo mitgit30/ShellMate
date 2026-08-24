@@ -10,8 +10,13 @@ ShellMate is a Linux server ops tool that uses an LLM to run diagnostics, handle
 * **Backend**: FastAPI, Pydantic, Uvicorn
 * **Agentic Runtime**: Python ReAct/pipeline runtime, Ollama Client
 * **LLM Models**: Configurable Ollama Cloud chat and embedding models
+<<<<<<< HEAD
 * **Database & Memory**: SQLite3 for live state, Chroma DB for semantic search
 * **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI
+=======
+* **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
+* **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI.
+>>>>>>> 0ae7a918ed7e27eec8c8944b4adf07ad0069350e
 * **Orchestration Tooling**: LangChain Core / LangChain Chroma
 
 ---
