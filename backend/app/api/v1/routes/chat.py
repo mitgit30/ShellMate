@@ -62,8 +62,8 @@ def update_chat_title(user_id: str, payload: ChatRequest) -> None:
         generated = str(response.get("message", {}).get("content", "")).strip().strip('"')
         if generated:
             title = " ".join(generated.split()).strip(" .,!?:;\"'")[:80]
-    except Exception:
-        logger.exception("chat_title_generation_failed session_id=%s", payload.session_id)
+    except Exception as exc:
+        log_exception(logger, "chat_title_generation", exc, {"session_id": payload.session_id})
     chat_history_service.set_title(user_id, payload.session_id, payload.server_id, title)
 
 

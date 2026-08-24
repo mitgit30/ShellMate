@@ -50,14 +50,16 @@ async def request_logging_middleware(request: Request, call_next):
             elapsed_ms,
         )
         return response
-    except Exception:
+    except Exception as exc:
         elapsed_ms = (time.perf_counter() - started_at) * 1000
-        logger.exception(
-            "request_failed method=%s path=%s duration_ms=%.2f",
+        logger.error(
+            "request_failed method=%s path=%s duration_ms=%.2f error=%s",
             request.method,
             request.url.path,
             elapsed_ms,
+            " ".join(str(exc).split())[:500] or type(exc).__name__,
         )
+        logger.debug("request_failed_trace method=%s path=%s", request.method, request.url.path, exc_info=exc)
         raise
     finally:
         reset_request_id(token)

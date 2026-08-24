@@ -11,6 +11,19 @@ from src.skills.router import SkillRouter
 logger = logging.getLogger(__name__)
 
 
+def _log_agent_error(operation: str, exc: Exception, **context: str) -> None:
+    """Keep agent failures readable while retaining a DEBUG traceback."""
+    context_text = " ".join(f"{key}={value}" for key, value in context.items())
+    suffix = f" {context_text}" if context_text else ""
+    logger.error(
+        "%s%s error=%s",
+        operation,
+        suffix,
+        " ".join(str(exc).split())[:500] or type(exc).__name__,
+    )
+    logger.debug("%s_trace%s", operation, suffix, exc_info=exc)
+
+
 class ServerOpsAgent:
     def __init__(
         self,
@@ -71,7 +84,7 @@ class ServerOpsAgent:
         try:
             route = self._skill_router.route(user_message=user_message, history=history)
         except Exception as exc:
-            logger.exception("Skill routing failed", extra={"session_id": session_id, "server_id": server_id})
+            _log_agent_error("skill_routing_failed", exc, session_id=session_id, server_id=server_id)
             fallback_reply = self._runtime_failure_message(
                 "I ran into a problem while deciding how to handle that request.",
                 exc,
@@ -91,7 +104,13 @@ class ServerOpsAgent:
         try:
             skill = self._skill_registry.get(route.skill_id)
         except Exception as exc:
-            logger.exception("Skill loading failed", extra={"session_id": session_id, "server_id": server_id, "skill_id": route.skill_id})
+            _log_agent_error(
+                "skill_loading_failed",
+                exc,
+                session_id=session_id,
+                server_id=server_id,
+                skill_id=route.skill_id,
+            )
             fallback_reply = self._runtime_failure_message(
                 "I selected a workflow for the request, but I couldn't load it correctly.",
                 exc,
@@ -127,7 +146,13 @@ class ServerOpsAgent:
                     continue
                 yield event
         except Exception as exc:
-            logger.exception("Skill execution failed", extra={"session_id": session_id, "server_id": server_id, "skill_id": route.skill_id})
+            _log_agent_error(
+                "skill_execution_failed",
+                exc,
+                session_id=session_id,
+                server_id=server_id,
+                skill_id=route.skill_id,
+            )
             fallback_reply = self._runtime_failure_message(
                 "I started working on that request, but the execution flow failed unexpectedly.",
                 exc,
@@ -144,16 +169,16 @@ class ServerOpsAgent:
 
         reply = "".join(reply_parts).strip()
         try:
-            self._context_extractor.extract(
-                server_id=server_id,
-                user_message=user_message,
-                assistant_message=reply,
-                tool_outputs=tool_outputs,
-                session_id=session_id,
+            self._context_extractor.extract(server_id=server_id,user_message=user_message,assistant_message=reply,tool_outputs=tool_outputs,session_id=session_id,
             )
-        except Exception:
+        except Exception as exc:
             # Memory extraction should never break the visible agent turn.
-            logger.exception("Memory extraction failed", extra={"session_id": session_id, "server_id": server_id})
+            _log_agent_error(
+                "memory_extraction_failed",
+                exc,
+                session_id=session_id,
+                server_id=server_id,
+            )
 
         self._persist_session(
             session=session,

@@ -9,13 +9,9 @@ class RuntimeSettings(BaseSettings):
     ollama_base_url: str = Field(default="https://ollama.com")
     ollama_api_key: str | None = None
     ollama_embedding_model: str = Field(default="nomic-embed-text")
-    agent_max_turns: int = Field(default=10, ge=1, le=10)
+    agent_max_turns: int = Field(default=10,ge=1,le=10)
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict(env_file=".env",env_file_encoding="utf-8",extra="ignore")
 
 
 @lru_cache

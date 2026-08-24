@@ -30,8 +30,13 @@ class SSHService:
         client = self._build_client()
         try:
             self._connect(client=client, server=server)
-        except SSHConnectionError:
-            logger.exception("ssh_connection_failed server_id=%s", server_id)
+        except SSHConnectionError as exc:
+            logger.error(
+                "ssh_connection_failed server_id=%s error=%s",
+                server_id,
+                " ".join(str(exc).split())[:500] or type(exc).__name__,
+            )
+            logger.debug("ssh_connection_failed_trace server_id=%s", server_id, exc_info=exc)
             raise
         finally:
             client.close()
@@ -58,7 +63,12 @@ class SSHService:
             stdout_text = stdout.read().decode("utf-8", errors="replace")
             stderr_text = stderr.read().decode("utf-8", errors="replace")
         except (SSHConnectionError, paramiko.SSHException, OSError, socket.timeout) as exc:
-            logger.exception("ssh_command_failed server_id=%s", server_id)
+            logger.error(
+                "ssh_command_failed server_id=%s error=%s",
+                server_id,
+                " ".join(str(exc).split())[:500] or type(exc).__name__,
+            )
+            logger.debug("ssh_command_failed_trace server_id=%s", server_id, exc_info=exc)
             raise SSHConnectionError(
                 f"Failed to execute command on server '{server_id}': {exc}"
             ) from exc

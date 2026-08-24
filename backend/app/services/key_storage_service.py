@@ -48,7 +48,7 @@ class KeyStorageService:
             try:
                 self._get_key_vault_client().get_secret(key_id)
             except Exception as exc:
-                logger.exception("azure_key_vault_validate_secret_failed key_id=%s", key_id)
+                _log_key_vault_error("validate_secret", key_id, exc)
                 raise InvalidKeyUploadError("SSH key was not found.") from exc
             return key_id
 
@@ -100,7 +100,7 @@ class KeyStorageService:
             try:
                 self._get_key_vault_client().begin_delete_secret(key_id)
             except Exception as exc:
-                logger.exception("azure_key_vault_delete_failed key_id=%s", key_id)
+                _log_key_vault_error("delete_secret", key_id, exc)
                 raise InvalidKeyUploadError("SSH key could not be deleted.") from exc
             logger.info("ssh_key_deleted backend=azure_key_vault key_id=%s", key_id)
             return
@@ -154,7 +154,7 @@ class KeyStorageService:
         try:
             self._get_key_vault_client().set_secret(key_id, key_value)
         except Exception as exc:
-            logger.exception("azure_key_vault_set_secret_failed key_id=%s", key_id)
+            _log_key_vault_error("set_secret", key_id, exc)
             raise InvalidKeyUploadError("The SSH key could not be stored in Azure Key Vault.") from exc
         logger.info("ssh_key_stored backend=azure_key_vault key_id=%s", key_id)
         return key_id
@@ -165,7 +165,7 @@ class KeyStorageService:
         try:
             value = self._get_key_vault_client().get_secret(key_id).value
         except Exception as exc:
-            logger.exception("azure_key_vault_get_secret_failed key_id=%s", key_id)
+            _log_key_vault_error("get_secret", key_id, exc)
             raise InvalidKeyUploadError("SSH key was not found in Azure Key Vault.") from exc
         if not value:
             raise InvalidKeyUploadError("SSH key value is empty.")
@@ -239,3 +239,24 @@ class KeyStorageService:
         except OSError:
             #no any windows error
             pass
+
+
+def _log_key_vault_error(operation: str, key_id: str, error: Exception) -> None:
+    """Write useful Azure diagnostics without dumping SDK tracebacks at INFO."""
+    status_code = getattr(error, "status_code", None)
+    error_code = getattr(error, "error_code", None)
+    message = " ".join(str(error).split())[:500]
+    logger.error(
+        "azure_key_vault_operation_failed operation=%s key_id=%s status_code=%s error_code=%s message=%s",
+        operation,
+        key_id,
+        status_code or "-",
+        error_code or "-",
+        message or type(error).__name__,
+    )
+    logger.debug(
+        "azure_key_vault_operation_trace operation=%s key_id=%s",
+        operation,
+        key_id,
+        exc_info=error,
+    )

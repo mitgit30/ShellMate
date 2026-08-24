@@ -34,5 +34,14 @@ def log_exception(
     exc: Exception,
     context: Mapping[str, object] | None = None,
 ) -> None:
+    """Log a concise production message and keep the traceback at DEBUG."""
     details = {key: value for key, value in (context or {}).items() if value is not None}
-    logger.exception("%s failed%s", operation, f" context={details!r}" if details else "")
+    context_text = f" context={details!r}" if details else ""
+    logger.error("%s failed%s error=%s", operation, context_text, _compact_error(exc))
+    logger.debug("%s traceback%s", operation, context_text, exc_info=exc)
+
+
+def _compact_error(exc: Exception, limit: int = 500) -> str:
+    """Make an exception useful in a one-line log record."""
+    message = " ".join(str(exc).split())
+    return (message or type(exc).__name__)[:limit]

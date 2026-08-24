@@ -1,6 +1,7 @@
 import logging
 
 from backend.app.core.config import get_settings
+from backend.app.core.error_handling import log_exception
 from backend.app.db.database import Database
 from backend.app.repositories.server_repository import DatabaseServerRepository
 from backend.app.services.key_storage_service import KeyStorageService
@@ -31,10 +32,12 @@ settings = get_settings()
 database = Database(settings.database_url, settings.server_database_path)
 try:
     database.initialize_schema()
-except Exception:
-    logger.exception(
-        "database_startup_unavailable backend=%s",
-        "postgresql" if database.is_postgres else "sqlite",
+except Exception as exc:
+    log_exception(
+        logger,
+        "database_startup_unavailable",
+        exc,
+        {"backend": "postgresql" if database.is_postgres else "sqlite"},
     )
 server_repository = DatabaseServerRepository(database=database)
 user_repository = UserRepository(database=database)

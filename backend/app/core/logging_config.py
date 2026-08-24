@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s request_id=%(request_id)s %(message)s"
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | request_id=%(request_id)s | %(message)s"
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_BACKUP_COUNT = 3
 
@@ -59,9 +59,28 @@ def configure_logging(
                 encoding="utf-8",
             )
         )
+        error_handler = RotatingFileHandler(
+            log_directory / "error.log",
+            maxBytes=DEFAULT_MAX_BYTES,
+            backupCount=DEFAULT_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        error_handler.setLevel(logging.ERROR)
+        handlers.append(error_handler)
 
     for handler in handlers:
         handler.addFilter(RequestIdFilter())
+
+    # Keep application logs useful. Our own audit logs remain visible while
+    # verbose SDK request/response dumps stay out of app.log.
+    for logger_name in (
+        "azure",
+        "azure.core.pipeline.policies.http_logging_policy",
+        "azure.identity",
+        "paramiko.transport",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
     logging.basicConfig(level=resolved_level, format=LOG_FORMAT, handlers=handlers)
     _CONFIGURED = True
 
