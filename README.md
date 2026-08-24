@@ -16,7 +16,6 @@ ShellMate is a Linux server ops tool that uses an LLM to run diagnostics, handle
 =======
 * **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
 * **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI.
->>>>>>> 0ae7a918ed7e27eec8c8944b4adf07ad0069350e
 * **Orchestration Tooling**: LangChain Core / LangChain Chroma
 
 ---
