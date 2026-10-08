@@ -1,172 +1,158 @@
-# ShellMate: System Architecture & Design Guide
+# ShellMate Architecture
 
-This guide describes the complete technical architecture of **ShellMate**, designed to help you explain the project's internal mechanics during interviews.
+This document describes the architecture implemented in the current codebase. ShellMate lets an authenticated user ask for Linux server operations in natural language, then routes the request through a skill that can use SSH tools, prepare an approved Docker deployment, or generate a static website.
 
----
-
-## 1. High-Level System Layers
-
-ShellMate is built using a decoupled, four-tier architecture:
-
-```text
-+-------------------------------------------------------+
-|                      STREAMLIT UI                     |  <- Frontend Control Surface
-+--------------------------+----------------------------+
-                           | HTTP Requests / NDJSON Streams
-                           v
-+-------------------------------------------------------+
-|                      FASTAPI API                      |  <- API Management & Routing
-|   Routes: Chat, Servers, keys, Sessions, Commands     |
-+--------------------------+----------------------------+
-                           | Instantiates
-                           v
-+-------------------------------------------------------+
-|                    RUNTIME ENGINE                     |  <- Routing, Memory & Execution
-|   ServerOpsAgent, SkillRouter, ContextExtractor      |
-+--------------------------+----------------------------+
-                           | Executes Actions
-                           v
-+-------------------------------------------------------+
-|                    EXECUTION LAYER                    |  <- Real-world interaction
-|   SSH (Paramiko), Docker Pipeline, Builder Tools      |
-+-------------------------------------------------------+
-```
-
-1. **Frontend Layer (Streamlit)**: Serves as the interactive UI. Communicates with the FastAPI backend using standard HTTP APIs and displays streamed tokens using NDJSON (Newline Delimited JSON) protocol.
-2. **Control API Layer (FastAPI)**: Serves endpoints for managing servers, uploading keys, keeping track of sessions, and initiating agent turns.
-3. **Runtime Engine Layer (Python)**: Drives conversational routing, runs skills, manages state, and runs background context extraction.
-4. **Execution Layer**: Real-world operations executing remote commands via SSH (using Paramiko) or managing local/remote Docker configurations.
-
----
-
-## 2. Core Pillars & Interconnection
-
-ShellMate separates operations into three specialized **Pillars** (Skills). This separation represents a crucial architectural decision: **separating safe diagnostic diagnostics from dangerous infrastructure changes.**
+## System overview
 
 ```mermaid
-flowchart TD
-    User([User Prompt]) --> Agent[ServerOpsAgent]
+flowchart LR
+    User[User] --> UI[Streamlit main UI]
+    User --> MonitorUI[Streamlit monitoring UI]
+    UI -->|HTTP APIs and NDJSON chat events| API[FastAPI backend]
+    MonitorUI -->|Authenticated HTTP APIs| API
+    API --> Auth[SQLite user and session repositories]
+    API --> AppDB[(SQLite application database)]
+    API --> Agent[ServerOpsAgent]
     Agent --> Router[SkillRouter]
-    
-    Router -->|Rule/Heuristic match| Pillar1[Pillar 1: SSH Skill]
-    Router -->|Rule/Heuristic match| Pillar2[Pillar 2: Deployment Skill]
-    Router -->|Rule/Heuristic match| Pillar3[Pillar 3: Builder Skill]
-
-    Pillar3 -->|Output path saved to memory| Memory[(Memory Manager)]
-    Memory -->|Path loaded as context| Pillar2
+    Router --> SSH[SSHSkill]
+    Router --> Deploy[DeploymentSkill]
+    Router --> Builder[BuilderSkill]
+    SSH --> SSHTool[SSHCommandTool]
+    Deploy --> DeployEngine[DeploymentEngine / DockerDeploymentPipeline]
+    Builder --> BuilderTool[BuilderTool]
+    SSHTool --> SSHService[Paramiko SSH service]
+    DeployEngine --> SSHService
+    BuilderTool --> SSHService
+    SSHService --> Server[User's Linux server]
+    Agent --> Model[Ollama Cloud model API]
+    Agent --> Memory[MemoryManager]
+    Memory --> MemoryDB[(SQLite server memory)]
+    Memory --> VectorDB[(Persistent ChromaDB)]
+    VectorDB --> Embed[Ollama Cloud embeddings]
+    API --> Monitor[SQLite task and event records]
 ```
 
-### Pillar 1: Day-to-Day Server Management (`SSHSkill`)
-* **Purpose**: Conversational diagnostics (checking disk usage, ports, uptime, inspecting logs).
-* **Execution Style**: Interactive ReAct (Reasoning and Acting) loop. The LLM repeatedly decides what read-only server commands to execute via SSH, inspects outcomes, and outputs a concise user-friendly summary.
-* **Safety constraint**: Prompted never to execute destructive commands (like modifying packages or stopping services) without explicit user confirmation.
+The main UI handles sign-in, server registration, chat, and deployment interaction. The separate monitoring UI displays saved agent tasks, progress, tool activity, and deployment status. Both communicate with the FastAPI backend; neither connects directly to servers or databases.
 
-### Pillar 2: Structured Deployment Engine (`DeploymentSkill`)
-* **Purpose**: Orchestrates multi-step, safety-critical Docker and Docker Compose rollouts.
-* **Execution Style**: A strict, stage-driven pipeline. Rather than giving the LLM raw terminal access to install packages, it uses a deterministic sequence:
-  1. *Validation*: Check if Docker is installed.
-  2. *Preparation*: Inspect paths, ports, and generate deployment configuration (Dockerfiles, Compose files).
-  3. *Approval*: Present proposed files and port mappings to the user and halt until confirmed.
-  4. *Rollout*: Run commands on the server to pull, build, and deploy containers.
-
-### Pillar 3: Builder (`BuilderSkill`)
-* **Purpose**: Generative static site creator (HTML, CSS, JS) tailored to brand styles.
-* **Execution Style**: Interactive design flow. Analyzes prompt specificity. If the prompt is too vague, it conversationally extracts visual preferences (discovery mode) before invoking the LLM to output structured JSON containing the static assets. Files are directly written to the server via the `BuilderTool`.
-
-### How the Pillars Interconnect
-The pillars are not isolated; they share state through the **Memory Manager** and **Session State**:
-* **Pillar 3 to Pillar 2 Handoff**: When the user requests a website to be built (*Pillar 3*), the generated folder path is persisted in memory. If the user next says *"deploy this app"*, the **Skill Router** shifts to *Pillar 2*, which extracts the path from memory and rolls it out as a Dockerized app without asking the user to specify the path again.
-
----
-
-## 3. The Turn Lifecycle & LLM Orchestration
-
-Every chat message submitted by the user kicks off a pipeline of LLM interactions:
+## The Turn Lifecycle
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
+    participant UI as Streamlit UI
+    participant API as FastAPI
+    participant DB as SQLite application DB
     participant Agent as ServerOpsAgent
     participant Router as SkillRouter
-    participant Skill as Chosen Skill
+    participant Skill as Selected skill
+    participant Tool as SSH / deployment tool
+    participant Server as Linux server
+    participant Model as Ollama Cloud
+    participant Monitor as Monitoring records
     participant Memory as MemoryManager
-    participant Extractor as ContextExtractor
-    
-    User->>Agent: "Deploy the website on port 80"
-    Agent->>Router: Route user prompt + last 6 messages
-    Router->>Router: Runs keyword heuristics
-    Router->>Router: Calls LLM (JSON Mode)
-    Router-->>Agent: Returns SkillRouteDecision (Pillar 2)
+    participant Chroma as ChromaDB
 
-    Agent->>Skill: execute(context)
-    Skill->>Memory: Query PromptComposer.build_memory_block()
-    Memory->>Memory: Read facts & documents from SQLite
-    Note over Memory: If query is historical, retrieve date-bounded records from Chroma DB
-    Memory-->>Skill: Return integrated memory context
-    Skill->>Skill: Agentic loop / Pipeline run (calls LLM with tools)
-    Skill-->>Agent: Yields response tokens + tool events
-    Agent-->>User: Streams response to UI
-    
-    Agent->>Extractor: Extract turn info (tool outputs + chat)
-    Extractor->>Extractor: Calls LLM
-    Extractor->>Memory: write_handoff() & update_server_facts() in SQLite
-    Extractor->>Memory: record_historical_memory() in Chroma DB (Sanitized)
+    User->>UI: Submit request
+    UI->>API: POST /chat/stream + bearer token
+    API->>DB: Authenticate user; verify server ownership
+    API->>DB: Restore chat history
+    API->>Monitor: Create task record
+    API->>Agent: stream_turn(session, server, message)
+    Agent->>Router: Route message and recent history
+    Router->>Router: Apply intent heuristics
+    opt No heuristic match
+        Router->>Model: Classify request into a skill
+        Model-->>Router: Skill ID and reason
+    end
+    Router-->>Agent: Skill decision
+    Agent->>Skill: Execute with conversation and session state
+    Skill->>Memory: Load server context and historical matches
+    opt Historical request
+        Memory->>Chroma: Search summaries by server and date range
+        Chroma-->>Memory: Matching historical summaries
+    end
+    Skill->>Model: Generate response or tool call
+    opt Server action is needed
+        Model-->>Skill: Tool call and arguments
+        Skill->>Tool: Execute requested operation
+        Tool->>Server: Run command over SSH
+        Server-->>Tool: Command result
+        Tool-->>Skill: Tool result
+        Skill->>Model: Continue with tool result
+    end
+    Skill-->>Agent: Progress, tool, and response events
+    Agent-->>API: Agent events
+    API->>Monitor: Persist non-token progress and tool events
+    API-->>UI: Stream NDJSON events
+    UI-->>User: Render response and progress
+    Agent->>Model: Extract facts from completed turn
+    Model-->>Agent: Structured memory summary or NO_REPLY
+    Agent->>Memory: Update SQLite memory
+    opt Useful historical summary was extracted
+        Memory->>Chroma: Sanitize and index summary
+    end
+    API->>DB: Save user and assistant messages
+    API->>Monitor: Mark task complete or failed
 ```
 
-1. **Routing Turn**: `SkillRouter` combines heuristic keyword matching and an LLM classification prompt to select a skill (Pillar).
-2. **Context Assembly & Hydration**: The chosen skill delegates prompt construction to `PromptComposer`. The composer reads active facts and documents from the SQLite database and, if a historical query is detected, fetches semantic date-bounded records from the Chroma vector database.
-3. **Execution & Tool Usage**: The skill calls `OllamaModelClient`. If the skill supports tools (like SSH command execution), the LLM outputs tool calls. The runtime executes them, feeds the results back to the LLM history, and loops until completion.
-4. **Streaming Response**: Tokens are generated and streamed back to the Streamlit UI immediately for a responsive user experience.
-5. **Silent Fact Extraction & Dual Database Write**: Once the turn completes, the `ContextExtractor` runs a silent, background LLM call. It evaluates the turn's context and tool outputs, parses discovered details, writes them to the SQLite store (updating active facts, sessions, and handoffs), and records the sanitized historical summary to the Chroma vector database.
+## Request and agent flow
 
----
+1. The UI sends a request with the user's bearer session token. The API resolves the user and checks ownership of the selected server for protected server and chat operations.
+2. The API restores saved chat messages into the agent's process-local session store and creates a monitoring task.
+3. `ServerOpsAgent` asks `SkillRouter` to select a skill. Deployment and website-generation intent have heuristic routing; other requests use an Ollama model classification call, with a default SSH skill fallback if the response cannot be parsed.
+4. The selected skill builds its prompt with `PromptComposer`, including relevant server memory when applicable, and calls `OllamaModelClient`.
+5. When needed, the skill invokes an explicit tool. SSH operations use Paramiko through `SSHService`; tool results are fed back to the skill so it can report observed results.
+6. The API writes non-token progress and tool events to the monitoring tables and sends chat events to the UI as newline-delimited JSON (`application/x-ndjson`).
+7. At the end of the turn, `ContextExtractor` makes a separate Ollama call to identify useful facts. It updates SQLite memory and may add a sanitized summary to ChromaDB. Memory extraction and vector search/indexing failures are designed not to fail the user-facing turn.
 
-## 4. The Memory System
+## Skills and execution boundaries
 
-A key feature of ShellMate is its hybrid memory architecture, combining a structured relational database (SQLite) for real-time state tracking and a semantic vector database (Chroma) for historical context retrieval.
+### SSH operations
 
-```text
-               +----------------------------------------+
-               |             MemoryManager              |
-               +-------------------+--------------------+
-                                   |
-                  +----------------+----------------+
-                  |                                 |
-                  v                                 v
-   +-----------------------------+   +-----------------------------+
-   |     SQLite Memory Store     |   |   Vector Historical Store   |
-   |  - memory_documents         |   |  - Chroma DB Backend        |
-   |  - memory_facts (Upserted)  |   |  - nomic-embed-text         |
-   |  - memory_observations      |   |  - Secret Sanitizer         |
-   +-----------------------------+   +-----------------------------+
-```
+`SSHSkill` handles server diagnostics and requested server-side actions. It calls the `run_ssh_command` tool in a bounded tool loop. Its instructions require server-side evidence before claiming an operation succeeded, including a follow-up verification command after changes. Destructive operations and package installation require explicit user approval.
 
-### 4.1. Real-Time State: SQLite Memory Store
-To prevent conflicting server information (e.g. a port marked both "free" and "occupied" simultaneously in append-only files), ShellMate stores active facts in SQLite. 
-* **`memory_documents`**: Stores larger, unstructured texts like the short-term `session` context and inter-skill `handoff` notes.
-* **`memory_facts`**: Stores key-value server parameters separated by category (`Paths`, `Packages`, `Ports`, `Containers`). On new observations, facts are matched by a hash key and updated using an UPSERT clause. This guarantees that facts remain non-contradictory.
-* **`memory_observations`**: Logs raw transaction payloads with sequential timestamps.
+### Docker deployment
 
-### 4.2. Historical Context: Semantic Vector Memory
-Longer-term, historical summaries generated by the `ContextExtractor` at the end of each turn are recorded in a vector database:
-* **Vector Store & Embeddings**: Uses Chroma DB configured with LangChain and Ollama's `nomic-embed-text` model.
-* **Security & Sanitization**: Before writing to Chroma, raw summaries pass through an automated sanitizer that redacts SSH private keys and masks sensitive credentials to prevent credential leakage in vectors.
-* **Metadata Scoping**: Entries are indexed with `server_id`, `session_id`, `source`, `observed_at`, and `observed_date` fields. This ensures vector search queries retrieve documents isolated strictly to the active server.
+`DeploymentSkill` delegates to `DeploymentEngine` and `DockerDeploymentPipeline`. The pipeline gathers deployment details, validates the request, generates deployment files and a plan, saves the pending approval state, and waits for explicit approval. After approval, it writes the files to the remote server, runs the Docker deployment actions through SSH, then performs post-deployment verification. The workflow state is held in the current agent process's session state.
 
-### 4.3. Date-Aware Heuristics & Context Injection
-When the user communicates with a skill, the system prompt is dynamically hydrated:
-1. **Keyword Analysis**: The `PromptComposer` checks if the query asks about historical events (using terms like *previously*, *earlier*, *history*, *before*, *ago*, etc.).
-2. **Relative Date Resolution**: The composer decodes relative time markers like *"today"*, *"yesterday"*, and *"X days/weeks/months/years ago"* into concrete calendar dates.
-3. **Bounded Vector Query**: A similarity search is dispatched to Chroma, scoped to the server ID, and filtered in Python to match the resolved date range.
-4. **Context Injection & Hallucination Guard**:
-   * If a historical range query returns empty, the composer inserts a warning to the LLM: preventing the model from hallucinating past operations.
+### Static website generation
 
----
+`BuilderSkill` generates HTML, CSS, and JavaScript files, then asks `BuilderTool` to write them to the selected server through SSH. The generated project path is retained in the agent session state for a later deployment handoff.
 
-## 5. Centralized LLM Client
+## Persistence and memory
 
-The model communication is wrapped cleanly inside `OllamaModelClient`:
-* Decoupled from the rest of the application.
-* Standardizes inputs into format structures compatible with Ollama's local inference schemas.
----
+The current application uses SQLite; it does not use PostgreSQL in this code version.
+
+| Store | Purpose | Current location/configuration |
+|---|---|---|
+| Application SQLite database | Users, hashed passwords, hashed bearer-session tokens, registered servers, chat history, and monitoring tasks/events | `backend/data/servers.db` |
+| Memory SQLite database | Per-server handoff/session documents, upserted facts, and observations | `backend/data/memory.db` |
+| ChromaDB | Semantic retrieval of historical server summaries | Persistent directory configured as `backend/data/chroma` |
+| Agent session store | Active conversation messages and pending skill/deployment state | In process memory; chat history is restored from SQLite on requests |
+
+Passwords use scrypt hashes. Raw session tokens are returned to the client while only their hashes are stored. SQLite repositories scope server, chat, and monitoring queries by user where applicable. SSH private keys are validated and stored locally under an opaque generated filename; file permissions are restricted on Linux. The current implementation does not retrieve SSH keys from Azure Key Vault.
+
+### Historical retrieval
+
+The context extractor attempts to save one sanitized summary to Chroma after a completed turn when it identifies useful information. Chroma metadata includes the server and session identifiers, source, and observation time. Historical prompts trigger a server-scoped similarity search; supported relative dates are resolved and matching records are filtered by date before they are added to the prompt. Ollama Cloud's `nomic-embed-text` model generates embeddings when records are added and when retrieval queries are made. Existing records are not re-embedded on every turn.
+
+## Backend API and monitoring
+
+FastAPI exposes authentication, health, chat/history, server and key management, command/session, and monitoring routes under `/api/v1`. Protected routes use bearer-token authentication. Chat streaming is newline-delimited JSON over HTTP rather than WebSockets. The monitoring endpoints return user-scoped task summaries and event details, including skill, step, tool, command, result, and timestamps; response token chunks are excluded from persisted monitoring events.
+
+The backend logs to the console and a rotating `logs/app.log` file when file logging is enabled. Request IDs, HTTP method/path/status, duration, and application operation events support local debugging. In Docker Compose, `./logs` is mounted into the backend container.
+
+## Model integration
+
+`OllamaModelClient` wraps the Ollama Python client and reads the configured model, API base URL, and API key from runtime settings. The same client serves routing, skill responses, context extraction, and deployment preparation. The vector store separately uses `langchain-ollama` embeddings against the configured Ollama Cloud endpoint.
+
+## Container deployment
+
+The repository defines three application images: FastAPI backend (`backend/app/Dockerfile`), main Streamlit UI (`frontend/Dockerfile`), and monitoring UI (`monitoring_agent/Dockerfile`). Docker Compose connects them on a private network; the frontend and monitoring service use `http://backend_app:8000/api/v1` inside that network. When running as separate Azure Container Apps, configure each UI's `API_BASE_URL` with the backend app URL and set the backend's `CORS_ALLOWED_ORIGINS` to the browser-facing UI origins.
+
+Containerizing the applications does not by itself make their state shared across replicas. The current source uses local SQLite files, local SSH key files, a persistent Chroma directory, and in-process workflow state. Preserve the data directories with persistent storage, and keep the backend at one replica unless state has been moved to shared services and workflow state is no longer process-local.
+
+## Evaluation
+
+`evals/test_cases.json` contains structured routing and deployment-safety cases. `evals/run_evaluation.py` runs the checks and can write a local Evidently HTML report and workspace data. Evaluation is a developer-invoked task, not part of normal chat request processing.
