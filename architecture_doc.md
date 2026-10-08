@@ -45,21 +45,22 @@ sequenceDiagram
     participant DB as SQLite application DB
     participant Agent as ServerOpsAgent
     participant Router as SkillRouter
-    participant Skill as Selected skill
+    participant Skill as Chosen skill
     participant Tool as SSH or deployment tool
     participant Server as Linux server
     participant Model as Ollama Cloud
     participant Monitor as Monitoring records
     participant Memory as MemoryManager
     participant Chroma as ChromaDB
+    participant Extractor as ContextExtractor
 
-    User->>UI: Submit request
-    UI->>API: Send chat stream request with bearer token
+    User->>UI: Submit a natural language request
+    UI->>API: POST /chat/stream with bearer token
     API->>DB: Authenticate user and verify server ownership
-    API->>DB: Restore chat history
+    API->>DB: Restore saved chat history
     API->>Monitor: Create task record
     API->>Agent: stream_turn(session, server, message)
-    Agent->>Router: Route message and recent history
+    Agent->>Router: Route prompt and recent history
     Router->>Router: Apply intent heuristics
     opt No heuristic match
         Router->>Model: Classify request into a skill
@@ -72,6 +73,7 @@ sequenceDiagram
         Memory->>Chroma: Search summaries by server and date range
         Chroma-->>Memory: Matching historical summaries
     end
+    Memory-->>Skill: Return integrated memory context
     Skill->>Model: Generate response or tool call
     opt Server action is needed
         Model-->>Skill: Tool call and arguments
@@ -86,10 +88,12 @@ sequenceDiagram
     API->>Monitor: Persist non-token progress and tool events
     API-->>UI: Stream NDJSON events
     UI-->>User: Render response and progress
-    Agent->>Model: Extract facts from completed turn
-    Model-->>Agent: Structured memory summary or NO_REPLY
-    Agent->>Memory: Update SQLite memory
+    Agent->>Extractor: Extract facts from chat and tool outputs
+    Extractor->>Model: Request structured memory extraction
+    Model-->>Extractor: Facts and summary, or NO_REPLY
+    Extractor->>Memory: Update handoff, session, and server facts in SQLite
     opt Useful historical summary was extracted
+        Extractor->>Memory: Save historical summary
         Memory->>Chroma: Sanitize and index summary
     end
     API->>DB: Save user and assistant messages
