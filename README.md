@@ -49,27 +49,18 @@ The codebase has four layers:
 3. **Runtime Engine (Python)**: Routes requests via `SkillRouter`, runs the selected pillar, manages state, and triggers context extraction in the background.
 4. **Execution Layer (Paramiko / Tools)**: Runs the actual SSH sessions, drives the Docker pipeline, and writes generated assets.
 
-```text
-+-------------------------------------------------------+
-|                      STREAMLIT UI                     |  <- Frontend UI
-+--------------------------+----------------------------+
-                           | HTTP Requests / NDJSON Streams
-                           v
-+-------------------------------------------------------+
-|                      FASTAPI API                      |  <- API & Session Management
-+--------------------------+----------------------------+
-                           | Instantiates
-                           v
-+-------------------------------------------------------+
-|                    RUNTIME ENGINE                     |  <- Routing & Orchestration
-|   ServerOpsAgent, SkillRouter, ContextExtractor        |
-+--------------------------+----------------------------+
-                           | Operations & Mutations
-                           v
-+-------------------------------------------------------+
-|                    EXECUTION LAYER                    |  <- Target Node Execution
-|   SSH (Paramiko), Docker Pipeline, Builder Tools       |
-+-------------------------------------------------------+
+```mermaid
+flowchart TD
+    UI[Streamlit UI<br/>Frontend]
+    API[FastAPI API<br/>API and session management]
+    Runtime[Runtime Engine<br/>ServerOpsAgent, SkillRouter, ContextExtractor]
+    Execution[Execution Layer<br/>SSH with Paramiko, Docker pipeline, Builder tools]
+    Server[Target Linux server]
+
+    UI -->|HTTP requests and NDJSON streams| API
+    API -->|Starts agent turn| Runtime
+    Runtime -->|Operations and mutations| Execution
+    Execution -->|Remote commands and file operations| Server
 ```
 
 ---
@@ -78,20 +69,18 @@ The codebase has four layers:
 
 Memory is split into a fast, accurate state store and a semantic historical store, managed by `MemoryManager`. This keeps prompts short while still letting the agent recall past sessions when it needs to.
 
-```text
-               +----------------------------------------+
-               |             MemoryManager               |
-               +-------------------+--------------------+
-                                   |
-                  +----------------+----------------+
-                  |                                 |
-                  v                                 v
-   +-----------------------------+   +-----------------------------+
-   |     SQLite Memory Store      |   |   Vector Historical Store    |
-   |  - memory_documents          |   |  - Chroma DB Backend         |
-   |  - memory_facts (Upserted)   |   |  - nomic-embed-text          |
-   |  - memory_observations       |   |  - Secret Sanitizer          |
-   +-----------------------------+   +-----------------------------+
+```mermaid
+flowchart TD
+    Memory[MemoryManager]
+    SQLite[(SQLite Memory Store<br/>memory_documents<br/>memory_facts<br/>memory_observations)]
+    Chroma[(Vector Historical Store<br/>ChromaDB)]
+    Embeddings[Ollama Cloud embedding model]
+    Sanitizer[Secret sanitizer]
+
+    Memory --> SQLite
+    Memory --> Sanitizer
+    Sanitizer -->|Sanitized historical summaries| Chroma
+    Chroma <-->|Create and query embeddings| Embeddings
 ```
 
 ### 3.1. Real-Time State: SQLite Memory Store
