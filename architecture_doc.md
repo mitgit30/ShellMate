@@ -46,7 +46,7 @@ sequenceDiagram
     participant Agent as ServerOpsAgent
     participant Router as SkillRouter
     participant Skill as Selected skill
-    participant Tool as SSH / deployment tool
+    participant Tool as SSH or deployment tool
     participant Server as Linux server
     participant Model as Ollama Cloud
     participant Monitor as Monitoring records
@@ -54,8 +54,8 @@ sequenceDiagram
     participant Chroma as ChromaDB
 
     User->>UI: Submit request
-    UI->>API: POST /chat/stream + bearer token
-    API->>DB: Authenticate user; verify server ownership
+    UI->>API: Send chat stream request with bearer token
+    API->>DB: Authenticate user and verify server ownership
     API->>DB: Restore chat history
     API->>Monitor: Create task record
     API->>Agent: stream_turn(session, server, message)
