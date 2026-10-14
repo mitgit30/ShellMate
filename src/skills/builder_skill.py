@@ -5,7 +5,7 @@ from src.memory.memory_manager import MemoryManager
 from src.deployments.utils import safe_json
 from src.runtime.ollama_client import OllamaModelClient
 from src.skills.base import BaseSkill, SkillContext
-from src.skills.builder_helpers import (chunk_text, clean_summary, is_capability_request, is_explicit_code_request, is_explicit_generation_request, is_generic_slug, is_vague_builder_request, sanitize_slug)
+from src.skills.builder_helpers import (chunk_text, clean_summary, has_builder_details, is_capability_request, is_explicit_code_request, is_explicit_generation_request, is_generic_slug, is_vague_builder_request, sanitize_slug)
 from src.tools.builder_tool import BuilderTool
 
 
@@ -56,6 +56,7 @@ class BuilderSkill(BaseSkill):
         yield {"type": "done"}
 
     def _run_discovery(self, context: SkillContext) -> Iterator[dict]:
+        context.session_state["builder_discovery_pending"] = True
         yield {
             "type": "step_started",
             "step": "builder_discovery",
@@ -72,13 +73,27 @@ class BuilderSkill(BaseSkill):
         yield {"type": "done"}
 
     def _generate_and_save_site(self, context: SkillContext) -> Iterator[dict]:
+        # A generic request must stop before any extraction or generation model call.
+        # In particular, do not let a previously-set discovery flag authorize a build.
+        if is_vague_builder_request(context.user_message) or (
+            context.session_state.get("builder_discovery_pending")
+            and not has_builder_details(context.user_message)
+        ):
+            yield from self._run_discovery(context)
+            return
+
+        request_details = self._extract_build_request(context)
+        if not self._has_minimum_build_brief(request_details):
+            yield from self._run_discovery(context)
+            return
+
+        context.session_state.pop("builder_discovery_pending", None)
         yield {
             "type": "step_started",
             "step": "builder_generate",
             "detail": "Designing the website and preparing the site files.",
         }
 
-        request_details = self._extract_build_request(context)
         try:
             result = self._generate_site(context, request_details)
         except ValueError:
@@ -195,23 +210,40 @@ class BuilderSkill(BaseSkill):
         )
 
     def _build_discovery_reply(self, context: SkillContext) -> str:
-        memory_block = self._memory_prompt_block(context)
         return self._generate_text(
             instruction=(
-                "The user wants to build a website, but the request is still too vague to generate a strong result. "
-                "Do not generate code. Respond like a thoughtful creative collaborator. "
-                "Ask for the minimum high-value details needed to build a strong first version, such as website type, style, sections, brand name, or audience."
+                "The user wants a website, but their user-authored messages do not yet provide enough direction to build the right one. "
+                "Do not generate a website, claim work has started, or invent a business, brand, or purpose. "
+                "Write a natural, concise follow-up question in your own words. Ask only for the most useful missing detail(s), "
+                "such as what the site is for, its name, preferred visual style, or key sections. "
+                "If a previous assistant message asked questions, consider the user's replies and ask only what remains unclear. "
+                "Make it easy to answer in one sentence; avoid numbered questionnaires and do not repeat every possible question."
             ),
             context=context,
-            fallback=(
-                "Absolutely. Before I design it, tell me a bit about what you want:\n\n"
-                "1. What kind of website is it?\n"
-                "2. What style should it have?\n"
-                "3. What sections do you want on the page?\n\n"
-                "If you want, you can answer in one line and I’ll build the first version from that."
-            ),
-            extra={"memory_block": memory_block},
+            fallback="I couldn't prepare a follow-up question right now. Please try again.",
         )
+
+    @staticmethod
+    def _has_minimum_build_brief(request_details: dict[str, object]) -> bool:
+        website_type = request_details.get("website_type")
+        if not isinstance(website_type, str) or not website_type.strip():
+            return False
+
+        supporting_details = (
+            "style_direction",
+            "target_audience",
+            "brand_name",
+            "project_path",
+            "folder_name",
+        )
+        if any(
+            isinstance(request_details.get(key), str)
+            and str(request_details[key]).strip()
+            for key in supporting_details
+        ):
+            return True
+        sections = request_details.get("sections")
+        return isinstance(sections, list) and bool(sections)
 
     def _generate_site(self, context: SkillContext, request_details: dict[str, object]) -> dict[str, str]:
         domain_instruction = (
@@ -238,7 +270,8 @@ class BuilderSkill(BaseSkill):
             "\n"
             "## Quality bar\n"
             "The final result should feel like something a designer and a developer shipped together — not like AI filler.\n"
-            "If the request is vague, infer the strongest possible creative direction and build that. Do not default to safe."
+            "Do not invent a brand, business identity, audience, address, testimonials, prices, or factual claims. "
+            "Use only details supplied in the conversation. You may make creative visual choices where the user left them open."
         )
         from src.runtime.prompt_composer import PromptComposer
         prompt = PromptComposer.compose_system_prompt(
@@ -280,14 +313,17 @@ class BuilderSkill(BaseSkill):
         if is_explicit_code_request(lowered):
             return "show_code"
 
-        if is_explicit_generation_request(lowered):
-            return "generate"
-
         if is_vague_builder_request(lowered):
             return "discovery"
 
         if is_capability_request(lowered):
             return "capability"
+
+        if context.session_state.get("builder_discovery_pending"):
+            return "generate"
+
+        if is_explicit_generation_request(lowered):
+            return "generate"
 
         payload = self._generate_json(
             instruction=(
@@ -308,15 +344,29 @@ class BuilderSkill(BaseSkill):
         return "generate"
 
     def _extract_build_request(self, context: SkillContext) -> dict[str, object]:
+        user_history = [
+            message for message in context.history
+            if message.get("role") == "user"
+        ]
+        user_context = SkillContext(
+            session_id=context.session_id,
+            server_id=context.server_id,
+            user_message=context.user_message,
+            history=user_history,
+            session_state=context.session_state,
+        )
         payload = self._generate_json(
             instruction=(
-                "Extract the structured builder request from the full conversation context. "
+                "Extract the structured builder request from user-authored messages only. "
                 "Return JSON only with keys: website_type, style_direction, sections, target_audience, brand_name, project_path, folder_name. "
+                "Every extracted value must be supported by wording in the user's messages. "
+                "Do not infer details from assistant messages, examples, memory, or suggestions. "
+                "Do not invent a business, brand, audience, or design preference. "
                 "Use null for unknown scalar fields and [] for unknown sections. "
                 "If the user clearly specified a save path or folder name, include it."
             ),
-            context=context,
-            extra={"latest_builder_output": context.session_state.get("latest_builder_output", {})},
+            context=user_context,
+            include_memory=False,
         )
         normalized: dict[str, object] = {}
         for key in ("website_type", "style_direction", "target_audience", "brand_name", "project_path", "folder_name"):
@@ -426,13 +476,19 @@ class BuilderSkill(BaseSkill):
             extra={"request_details": request_details},
         )
 
-    def _generate_json(self, instruction: str, context: SkillContext, extra: dict | None = None) -> dict:
+    def _generate_json(
+        self,
+        instruction: str,
+        context: SkillContext,
+        extra: dict | None = None,
+        include_memory: bool = True,
+    ) -> dict:
         domain_instruction = f"You are ShellMate's Builder assistant.\n{instruction}"
         from src.runtime.prompt_composer import PromptComposer
         system_content = PromptComposer.compose_system_prompt(
             domain_instruction=domain_instruction,
-            server_id=context.server_id,
-            memory_manager=self._memory_manager,
+            server_id=context.server_id if include_memory else None,
+            memory_manager=self._memory_manager if include_memory else None,
             require_json=True,
         )
         messages = [

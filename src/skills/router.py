@@ -2,6 +2,7 @@ import json
 
 from src.runtime.models import SkillRouteDecision
 from src.runtime.ollama_client import OllamaModelClient
+from src.skills.builder_helpers import is_explicit_generation_request, is_vague_builder_request
 from src.skills.registry import SkillRegistry
 
 
@@ -95,6 +96,9 @@ class SkillRouter:
 
     @staticmethod
     def _is_builder_request(lowered: str) -> bool:
+        if is_vague_builder_request(lowered) or is_explicit_generation_request(lowered):
+            return True
+
         builder_terms = (
             "build me a website",
             "create a website",
