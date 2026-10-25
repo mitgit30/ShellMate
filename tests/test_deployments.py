@@ -57,7 +57,8 @@ def test_prompt_composer_mechanics() -> None:
     )
     assert instruction in composed_text
     assert "Return raw, valid JSON only." not in composed_text
-    assert "Respond naturally, clearly, and briefly." in composed_text
+    assert "Respond naturally, clearly, and briefly in plain text, not Markdown." in composed_text
+    assert "Do not use Markdown tables" in composed_text
 
     # 3. Test memory block assembly mock
     class MockMemoryManager:

@@ -24,3 +24,18 @@ evals/evidently_workspace/
 !src/memory/*.py
 .env.example
 docs
+
+# Next.js / Node frontend (frontend-next)
+node_modules/
+.next/
+out/
+.vercel/
+frontend-next/.env*
+!frontend-next/.env.example
+frontend-next/next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+bun-debug.log*

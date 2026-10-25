@@ -1,0 +1,74 @@
+"use client";
+
+import { Brand } from "@/components/brand";
+import { MONITOR_URL } from "@/lib/api-client";
+import type { ChatSession, CurrentUser, Server } from "@/types/domain";
+
+type WorkspaceSidebarProps = {
+  user: CurrentUser;
+  servers: Server[];
+  connectedServer: Server | null;
+  sessions: ChatSession[];
+  activeSession: ChatSession | null;
+  loadingServers: boolean;
+  busy: boolean;
+  onRegisterServer: () => void;
+  onConnectServer: (server: Server) => void;
+  onSelectSession: (session: ChatSession) => void;
+  onNewChat: () => void;
+  onLogout: () => void;
+};
+
+export function WorkspaceSidebar({
+  user,
+  servers,
+  connectedServer,
+  sessions,
+  activeSession,
+  loadingServers,
+  busy,
+  onRegisterServer,
+  onConnectServer,
+  onSelectSession,
+  onNewChat,
+  onLogout,
+}: WorkspaceSidebarProps) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand"><Brand compact /><span className="workspace-label">Workspace</span></div>
+      <div className="sidebar-section-heading"><span>Your servers</span><button className="icon-button add-server" onClick={onRegisterServer} aria-label="Register server">+</button></div>
+      <div className="server-list">
+        {loadingServers && <p className="sidebar-muted">Loading servers…</p>}
+        {!loadingServers && servers.length === 0 && <div className="sidebar-empty"><p>No servers yet</p><button onClick={onRegisterServer}>Register your first server</button></div>}
+        {servers.map((server) => (
+          <button key={server.id} className={`server-item ${connectedServer?.id === server.id ? "server-item-active" : ""}`} onClick={() => onConnectServer(server)} disabled={busy}>
+            <span className={`server-status ${connectedServer?.id === server.id ? "status-online" : ""}`} />
+            <span className="server-item-copy"><strong>{server.name}</strong><small>{server.host}</small></span>
+            <span className="server-chevron">›</span>
+          </button>
+        ))}
+      </div>
+      {connectedServer && <div className="sidebar-chats">
+        <div className="sidebar-section-heading sidebar-chat-heading">
+          <span title={`Chats · ${connectedServer.name}`}>Chats · {connectedServer.name}</span>
+          <button className="icon-button add-server" onClick={onNewChat} disabled={busy} aria-label="New chat" title="New chat">+</button>
+        </div>
+        {sessions.map((session) => (
+          <button key={session.session_id} className={`chat-nav-item ${activeSession?.session_id === session.session_id ? "chat-nav-active" : ""}`} onClick={() => onSelectSession(session)} disabled={busy} aria-current={activeSession?.session_id === session.session_id ? "page" : undefined}>
+            {session.title || "New chat"}
+          </button>
+        ))}
+      </div>}
+      <div className="sidebar-bottom">
+        <a className="monitor-link" href={`${MONITOR_URL}/?${new URLSearchParams({ access_token: user.token, server_id: connectedServer?.id ?? "" })}`} target="_blank" rel="noreferrer" aria-disabled={!connectedServer} onClick={(event) => { if (!connectedServer) event.preventDefault(); }}>
+          <span className="monitor-icon">◉</span> Agent monitor <span className="external-arrow">↗</span>
+        </a>
+        <div className="account-row">
+          <span className="account-avatar">{user.email.slice(0, 1).toUpperCase()}</span>
+          <span className="account-copy"><strong>{user.email}</strong><small>Signed in</small></span>
+          <button className="icon-button logout-button" onClick={onLogout} aria-label="Sign out" title="Sign out">⇥</button>
+        </div>
+      </div>
+    </aside>
+  );
+}
