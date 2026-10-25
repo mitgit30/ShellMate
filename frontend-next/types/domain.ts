@@ -36,18 +36,8 @@ export type ChatMessage = {
   id?: string;
   error?: string;
   failed?: boolean;
-  commandBlocks?: ChatCommandBlock[];
-};
-
-export type CommandRisk = "read-only" | "controlled" | "destructive";
-
-export type ChatCommandBlock = {
-  id: string;
-  command: string;
-  risk: CommandRisk;
-  output: string;
-  status: "running" | "completed" | "failed" | "interrupted";
-  exitStatus?: number;
+  // The history API does not retain tool events, so retries are confirmed conservatively.
+  mayRepeatCommand?: boolean;
 };
 
 export type ChatHistoryMessage = {
@@ -62,9 +52,4 @@ export type StreamEvent = {
   detail?: string;
   tool_name?: string;
   step?: string;
-  command?: string;
-  iteration?: number;
-  stdout?: string;
-  stderr?: string;
-  exit_status?: number;
 };

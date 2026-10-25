@@ -3,8 +3,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { API_PREFIX, apiRequest } from "@/lib/api-client";
-import { estimateCommandRisk } from "@/lib/command-risk";
-import type { AuthResult, ChatCommandBlock, ChatHistoryMessage, ChatMessage, ChatSession, CurrentUser, Server, StreamEvent } from "@/types/domain";
+import type { AuthResult, ChatHistoryMessage, ChatMessage, ChatSession, CurrentUser, Server, StreamEvent } from "@/types/domain";
 
 export type WorkspaceNotice = {
   message: string;
@@ -71,6 +70,7 @@ export function useShellmate() {
       role: message.role === "user" ? "user" : "assistant",
       content: message.content,
       createdAt: message.created_at,
+      mayRepeatCommand: message.role !== "user",
     })));
   }
 
@@ -214,45 +214,11 @@ export function useShellmate() {
           updateAssistant((assistant) => ({ ...assistant, content: assistant.content + event.content }));
         } else if (event.type === "error") {
           streamError = event.detail || "The chat request failed.";
-        } else if (event.type === "tool_called" && event.command) {
-          const block: ChatCommandBlock = {
-            id: crypto.randomUUID(),
-            command: event.command,
-            risk: estimateCommandRisk(event.command),
-            output: "",
-            status: "running",
-          };
-          updateAssistant((assistant) => ({ ...assistant, commandBlocks: [...(assistant.commandBlocks ?? []), block] }));
-          setActivity("Running a server command…");
-        } else if (event.type === "tool_event" && event.command) {
-          updateAssistant((assistant) => {
-            const blocks = [...(assistant.commandBlocks ?? [])];
-            let blockIndex = -1;
-            for (let index = blocks.length - 1; index >= 0; index -= 1) {
-              if (blocks[index].command === event.command && blocks[index].status === "running") {
-                blockIndex = index;
-                break;
-              }
-            }
-            if (blockIndex < 0) {
-              blocks.push({
-                id: crypto.randomUUID(),
-                command: event.command!,
-                risk: estimateCommandRisk(event.command!),
-                output: "",
-                status: "running",
-              });
-              blockIndex = blocks.length - 1;
-            }
-            const output = [event.stdout, event.stderr].filter(Boolean).join("\n").trim();
-            blocks[blockIndex] = {
-              ...blocks[blockIndex],
-              output,
-              exitStatus: event.exit_status,
-              status: event.exit_status === 0 ? "completed" : "failed",
-            };
-            return { ...assistant, commandBlocks: blocks };
-          });
+        } else if (event.type === "tool_called") {
+          updateAssistant((assistant) => ({ ...assistant, mayRepeatCommand: true }));
+          setActivity("Shellmate is checking the server…");
+        } else if (event.type === "tool_event") {
+          updateAssistant((assistant) => ({ ...assistant, mayRepeatCommand: true }));
         } else if (event.type === "step_started" || event.type === "intent_detected") {
           setActivity(event.detail || (event.tool_name ? `Using ${event.tool_name}` : "Working on your request…"));
         } else if (event.type === "done") {
@@ -276,7 +242,6 @@ export function useShellmate() {
       updateAssistant((assistant) => ({
         ...assistant,
         createdAt: new Date().toISOString(),
-        commandBlocks: assistant.commandBlocks?.map((block) => block.status === "running" ? { ...block, status: "interrupted" } : block),
       }));
     } catch (err) {
       streamFailed = true;
@@ -285,7 +250,6 @@ export function useShellmate() {
         ...item,
         failed: true,
         error: detail,
-        commandBlocks: item.commandBlocks?.map((block) => block.status === "running" ? { ...block, status: "interrupted" } : block),
       } : item));
     } finally {
       setBusy(false);
