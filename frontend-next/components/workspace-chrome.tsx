@@ -10,7 +10,6 @@ export function WorkspaceHeader({ serverTitle, onRegisterServer }: WorkspaceHead
     <header className="workspace-topbar">
       <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{serverTitle}</strong></div>
       <div className="topbar-actions">
-        <span className="secure-label"><span className="live-dot" />Private session</span>
         <button className="button button-outline top-register" onClick={onRegisterServer}>＋ <span>Register server</span></button>
       </div>
     </header>

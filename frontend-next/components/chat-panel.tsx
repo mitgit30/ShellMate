@@ -27,6 +27,16 @@ function shortTitle(title: string) {
   return normalized.length > 40 ? normalized.slice(0, 39).trimEnd() + "…" : normalized;
 }
 
+function resizeMessageInput(input: HTMLTextAreaElement | null) {
+  if (!input) return;
+
+  input.style.height = "auto";
+  const maxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight);
+  const height = Number.isFinite(maxHeight) ? Math.min(input.scrollHeight, maxHeight) : input.scrollHeight;
+  input.style.height = `${height}px`;
+  input.style.overflowY = input.scrollHeight > height ? "auto" : "hidden";
+}
+
 export function ChatPanel({
   server,
   activeSession,
@@ -44,6 +54,7 @@ export function ChatPanel({
   onRetry,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
 
   useEffect(() => {
@@ -56,6 +67,16 @@ export function ChatPanel({
     const list = messageListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [activeSession?.session_id]);
+
+  useEffect(() => {
+    resizeMessageInput(messageInputRef.current);
+  }, [draft]);
+
+  useEffect(() => {
+    const handleResize = () => resizeMessageInput(messageInputRef.current);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   function trackScrollPosition() {
     const list = messageListRef.current;
@@ -121,8 +142,6 @@ export function ChatPanel({
           {messages.length === 0 ? (
             <div className="chat-empty">
               <div className="chat-empty-mark"><span className="brand-mark" aria-hidden="true">&gt;_</span></div>
-              <div className="eyebrow"><span className="eyebrow-line" />Shellmate assistant</div>
-              <h2>What would you like<br />to work on?</h2>
               <p>Ask about this server, investigate an issue, or start a guided deployment.</p>
               <div className="suggestion-row">
                 <button type="button" onClick={() => onUseSuggestion("Check the current CPU, memory, and disk usage")}>Check server health <span>→</span></button>
@@ -150,10 +169,10 @@ export function ChatPanel({
 
         <div className="chat-composer-wrap">
           <form className="chat-composer" onSubmit={onSubmit}>
-            <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="Ask Shellmate about your server…" rows={1} disabled={busy || !activeSession} onKeyDown={submitOnEnter} aria-label="Message Shellmate" />
+            <textarea ref={messageInputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="Ask Shellmate about your server…" rows={1} disabled={busy || !activeSession} onKeyDown={submitOnEnter} aria-label="Message Shellmate" />
             <div className="chat-composer-footer">
-              <span><kbd>Enter</kbd> to send <span className="composer-separator">·</span> <kbd>Shift + Enter</kbd> for a new line</span>
-              <button className="send-button" type="submit" aria-label="Send message" disabled={busy || !activeSession || !draft.trim()}>{busy ? <span className="send-spinner" /> : "↑"}</button>
+              <span className="composer-shortcut"><kbd>Enter</kbd> to send</span>
+              <button className="send-button" type="submit" aria-label="Send message" disabled={busy || !activeSession || !draft.trim()}>{busy ? <span className="send-spinner" /> : <span className="send-icon" aria-hidden="true">↑</span>}</button>
             </div>
           </form>
           <p className="chat-disclaimer">Shellmate can make mistakes. Review important commands and changes on your server.</p>

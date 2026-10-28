@@ -41,7 +41,7 @@ export function WorkspaceSidebar({
         {loadingServers && <p className="sidebar-muted">Loading servers…</p>}
         {!loadingServers && servers.length === 0 && <div className="sidebar-empty"><p>No servers yet</p><button onClick={onRegisterServer}>Register your first server</button></div>}
         {servers.map((server) => (
-          <button key={server.id} className={`server-item ${connectedServer?.id === server.id ? "server-item-active" : ""}`} onClick={() => onConnectServer(server)} disabled={busy}>
+          <button key={server.id} className={`server-item ${connectedServer?.id === server.id ? "server-item-active" : ""}`} onClick={() => onConnectServer(server)} disabled={busy} aria-pressed={connectedServer?.id === server.id}>
             <span className={`server-status ${connectedServer?.id === server.id ? "status-online" : ""}`} />
             <span className="server-item-copy"><strong>{server.name}</strong><small>{server.host}</small></span>
             <span className="server-chevron">›</span>
