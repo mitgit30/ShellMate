@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shellmate — Linux server operations",
+  title: "Shellmate",
   description: "A clearer, safer way to work with your Linux servers.",
 };
 

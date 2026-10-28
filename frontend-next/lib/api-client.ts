@@ -1,6 +1,5 @@
 
 export const API_PREFIX = "/api/backend";
-export const MONITOR_URL = process.env.NEXT_PUBLIC_MONITOR_URL ?? "http://localhost:8502";
 
 export async function apiRequest<T>(
   path: string,

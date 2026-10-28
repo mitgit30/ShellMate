@@ -1,7 +1,6 @@
 "use client";
 
 import { Brand } from "@/components/brand";
-import { MONITOR_URL } from "@/lib/api-client";
 import type { ChatSession, CurrentUser, Server } from "@/types/domain";
 
 type WorkspaceSidebarProps = {
@@ -33,6 +32,49 @@ export function WorkspaceSidebar({
   onNewChat,
   onLogout,
 }: WorkspaceSidebarProps) {
+  function openMonitor(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!connectedServer) {
+      event.preventDefault();
+      return;
+    }
+
+    event.preventDefault();
+    const monitorUrl = new URL("/monitor", window.location.origin);
+    monitorUrl.searchParams.set("server_id", connectedServer.id);
+
+    let monitorWindow: Window | null = null;
+    let handshakeTimeout = 0;
+    const handleReady = (message: MessageEvent) => {
+      if (
+        message.origin !== window.location.origin
+        || message.source !== monitorWindow
+        || message.data?.type !== "shellmate-monitor-ready"
+      ) return;
+
+      monitorWindow?.postMessage({
+        type: "shellmate-monitor-auth",
+        token: user.token,
+        email: user.email,
+        serverId: connectedServer.id,
+      }, window.location.origin);
+      window.removeEventListener("message", handleReady);
+      window.clearTimeout(handshakeTimeout);
+    };
+
+    window.addEventListener("message", handleReady);
+    monitorWindow = window.open(monitorUrl.toString(), "_blank");
+    if (!monitorWindow) {
+      window.removeEventListener("message", handleReady);
+      window.alert("Allow pop-ups to open the agent monitor in a new tab.");
+      return;
+    }
+
+    handshakeTimeout = window.setTimeout(
+      () => window.removeEventListener("message", handleReady),
+      10_000,
+    );
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand"><Brand compact /><span className="workspace-label">Workspace</span></div>
@@ -60,7 +102,7 @@ export function WorkspaceSidebar({
         ))}
       </div>}
       <div className="sidebar-bottom">
-        <a className="monitor-link" href={`${MONITOR_URL}/?${new URLSearchParams({ access_token: user.token, server_id: connectedServer?.id ?? "" })}`} target="_blank" rel="noreferrer" aria-disabled={!connectedServer} onClick={(event) => { if (!connectedServer) event.preventDefault(); }}>
+        <a className="monitor-link" href={connectedServer ? `/monitor?server_id=${encodeURIComponent(connectedServer.id)}` : "#"} aria-disabled={!connectedServer} onClick={openMonitor}>
           <span className="monitor-icon">◉</span> Agent monitor <span className="external-arrow">↗</span>
         </a>
         <div className="account-row">

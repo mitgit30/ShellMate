@@ -53,3 +53,36 @@ export type StreamEvent = {
   tool_name?: string;
   step?: string;
 };
+
+export type MonitorTask = {
+  task_id: string;
+  session_id: string;
+  server_id: string;
+  user_request: string;
+  status: "running" | "completed" | "failed" | string;
+  current_skill: string | null;
+  current_step: string | null;
+  deployment_status: string;
+  started_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+};
+
+export type MonitorEvent = {
+  event_id: number;
+  task_id: string;
+  event_type: string;
+  detail: string | null;
+  skill_id: string | null;
+  step: string | null;
+  tool_name: string | null;
+  command: string | null;
+  iteration: number | null;
+  exit_status: number | null;
+  created_at: string;
+};
+
+export type MonitorTaskDetails = {
+  task: MonitorTask;
+  events: MonitorEvent[];
+};
