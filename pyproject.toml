@@ -1,7 +1,7 @@
 [project]
 name = "chat-linux-server-manager"
 version = "0.1.0"
-description = "Chat-based Linux server manager with FastAPI, Paramiko, and Streamlit."
+description = "Shellmate"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
     "langchain-chroma>=1.1.0",
     "langchain-ollama>=1.1.0",
     "ollama>=0.5.1",
+    "openai>=3.48.0",
     "paramiko>=4.0.0",
     "pydantic>=2.13.3",
     "pydantic-settings>=2.11.0",

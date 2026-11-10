@@ -6,16 +6,12 @@ ShellMate is a Linux server ops tool that uses an LLM to run diagnostics, handle
 
 ## Technology Stack
 
-* **Frontend**: Streamlit (streams tokens over NDJSON)
+* **Frontend**: Next.js
 * **Backend**: FastAPI, Pydantic, Uvicorn
-* **Agentic Runtime**: Python ReAct/pipeline runtime, Ollama Client
-* **LLM Models**: Configurable Ollama Cloud chat and embedding models
-<<<<<<< HEAD
+* **Agentic Runtime**: Python ReAct/pipeline runtime, OpenRouter chat client
+* **LLM Models**: OpenRouter chat model and Ollama Cloud embedding model
 * **Database & Memory**: SQLite3 for live state, Chroma DB for semantic search
 * **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI
-=======
-* **Database & Memory**: SQLite3 (Real-time state database), Chroma DB (Semantic vector store)
-* **Remote Execution**: Paramiko (SSHv2 / SFTP), Docker CLI, Docker Compose CLI.
 * **Orchestration Tooling**: LangChain Core / LangChain Chroma
 
 ---
@@ -107,16 +103,19 @@ Past execution summaries are stored semantically so the agent can pull in releva
 
 ### 4.1. Prerequisites
 * Python 3.11+
-* Ollama Cloud credentials, or an accessible Ollama-compatible endpoint
+* OpenRouter API credentials for chat
+* Ollama Cloud credentials for historical-memory embeddings
 * Target Linux nodes with SSH access
 
 ### 4.2. Model Configuration
-Set the model endpoint and credentials in `.env`:
+Set the model endpoints and credentials in `.env`:
 ```bash
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OLLAMA_BASE_URL=https://ollama.com
-OLLAMA_API_KEY=your-ollama-cloud-key
-OLLAMA_MODEL=your-chat-model
-OLLAMA_EMBEDDING_MODEL=your-embedding-model
+OLLAMA_API_KEY=your-ollama-cloud-embedding-key
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 CORS_ALLOWED_ORIGINS=http://localhost:8501
 ```
 
