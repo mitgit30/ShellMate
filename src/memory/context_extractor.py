@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from src.memory.memory_manager import MemoryManager
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 
 
 NO_REPLY = "NO_REPLY"
@@ -15,7 +15,7 @@ class ExtractionResult:
 
 
 class ContextExtractor:
-    def __init__(self, model_client: OllamaModelClient, memory_manager: MemoryManager) -> None:
+    def __init__(self, model_client: OpenRouterModelClient, memory_manager: MemoryManager) -> None:
         self._model_client = model_client
         self._memory_manager = memory_manager
 

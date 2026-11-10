@@ -26,13 +26,18 @@ class HistoricalMemoryStore:
         from langchain_ollama import OllamaEmbeddings
 
         settings = get_runtime_settings()
-        if not settings.ollama_api_key:
+        ollama_api_key = (
+            settings.ollama_api_key.get_secret_value().strip()
+            if settings.ollama_api_key is not None
+            else ""
+        )
+        if not ollama_api_key:
             raise RuntimeError(
                 "OLLAMA_API_KEY is required for Ollama Cloud embeddings."
             )
         client_kwargs = {
             "headers": {
-                "Authorization": f"Bearer {settings.ollama_api_key}",
+                "Authorization": f"Bearer {ollama_api_key}",
             }
         }
         embeddings = OllamaEmbeddings(

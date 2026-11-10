@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.deployments.docker_helpers import container_port, execution_actions
 from src.deployments.models import DeploymentContext, DeploymentState
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.router import SkillRouter
 from src.skills.registry import SkillRegistry
 from src.skills.deployment_skill import DeploymentSkill
@@ -35,7 +35,7 @@ def build_router() -> SkillRouter:
             EvaluationSkill("deployment", "Handles Docker deployments."),
         ]
     )
-    return SkillRouter(model_client=OllamaModelClient(), skill_registry=registry)
+    return SkillRouter(model_client=OpenRouterModelClient(), skill_registry=registry)
 
 
 def run() -> int:
