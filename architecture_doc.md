@@ -24,7 +24,7 @@ flowchart LR
     DeployEngine --> SSHService
     BuilderTool --> SSHService
     SSHService --> Server[User's Linux server]
-    Agent --> Model[Ollama Cloud model API]
+    Agent --> Model[OpenRouter chat model API]
     Agent --> Memory[MemoryManager]
     Memory --> MemoryDB[(SQLite server memory)]
     Memory --> VectorDB[(Persistent ChromaDB)]
@@ -48,7 +48,7 @@ sequenceDiagram
     participant Skill as Chosen skill
     participant Tool as SSH or deployment tool
     participant Server as Linux server
-    participant Model as Ollama Cloud
+    participant Model as OpenRouter
     participant Monitor as Monitoring records
     participant Memory as MemoryManager
     participant Chroma as ChromaDB
@@ -104,11 +104,11 @@ sequenceDiagram
 
 1. The UI sends a request with the user's bearer session token. The API resolves the user and checks ownership of the selected server for protected server and chat operations.
 2. The API restores saved chat messages into the agent's process-local session store and creates a monitoring task.
-3. `ServerOpsAgent` asks `SkillRouter` to select a skill. Deployment and website-generation intent have heuristic routing; other requests use an Ollama model classification call, with a default SSH skill fallback if the response cannot be parsed.
-4. The selected skill builds its prompt with `PromptComposer`, including relevant server memory when applicable, and calls `OllamaModelClient`.
+3. `ServerOpsAgent` asks `SkillRouter` to select a skill. Deployment and website-generation intent have heuristic routing; other requests use an OpenRouter model classification call, with a default SSH skill fallback if the response cannot be parsed.
+4. The selected skill builds its prompt with `PromptComposer`, including relevant server memory when applicable, and calls `OpenRouterModelClient`.
 5. When needed, the skill invokes an explicit tool. SSH operations use Paramiko through `SSHService`; tool results are fed back to the skill so it can report observed results.
 6. The API writes non-token progress and tool events to the monitoring tables and sends chat events to the UI as newline-delimited JSON (`application/x-ndjson`).
-7. At the end of the turn, `ContextExtractor` makes a separate Ollama call to identify useful facts. It updates SQLite memory and may add a sanitized summary to ChromaDB. Memory extraction and vector search/indexing failures are designed not to fail the user-facing turn.
+7. At the end of the turn, `ContextExtractor` makes a separate OpenRouter call to identify useful facts. It updates SQLite memory and may add a sanitized summary to ChromaDB. Memory extraction and vector search/indexing failures are designed not to fail the user-facing turn.
 
 ## Skills and execution boundaries
 
@@ -149,7 +149,7 @@ The backend logs to the console and a rotating `logs/app.log` file when file log
 
 ## Model integration
 
-`OllamaModelClient` wraps the Ollama Python client and reads the configured model, API base URL, and API key from runtime settings. The same client serves routing, skill responses, context extraction, and deployment preparation. The vector store separately uses `langchain-ollama` embeddings against the configured Ollama Cloud endpoint.
+`OpenRouterModelClient` uses the OpenAI Python SDK against OpenRouter's OpenAI-compatible chat completions API and reads its model, base URL, and API key from runtime settings. It adapts responses to Shellmate's existing internal message shape, so routing, skills, context extraction, and deployment preparation retain their current workflow. Historical vector search remains separate and currently uses `langchain-ollama` embeddings against the configured Ollama Cloud endpoint; changing the embedding model requires re-indexing stored summaries.
 
 ## Container deployment
 

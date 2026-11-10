@@ -9,7 +9,7 @@ from src.deployments.models import (
     DeploymentState,
 )
 from src.deployments.utils import safe_json
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import SkillContext
 
 
@@ -73,7 +73,7 @@ def apply_preparation_details(context: DeploymentContext, extracted: dict) -> No
         context.state["root_path"] = str(extracted["root_path"])
 
 
-def select_deployment_type(model_client: OllamaModelClient, context: SkillContext) -> str:
+def select_deployment_type(model_client: OpenRouterModelClient, context: SkillContext) -> str:
     state = DeploymentState.from_session(context.session_state)
     if state and state.deployment_type:
         return str(state.deployment_type)
@@ -94,7 +94,7 @@ def select_deployment_type(model_client: OllamaModelClient, context: SkillContex
     return deployment_type if deployment_type in {DEPLOYMENT_TYPE_DOCKER_COMPOSE, DEPLOYMENT_TYPE_DOCKER_SINGLE} else DEPLOYMENT_TYPE_DOCKER_SINGLE
 
 
-def extract_preparation_details(model_client: OllamaModelClient, context: DeploymentContext) -> dict:
+def extract_preparation_details(model_client: OpenRouterModelClient, context: DeploymentContext) -> dict:
     payload = generate_json(
         model_client,
         instruction=(
@@ -117,7 +117,7 @@ def extract_preparation_details(model_client: OllamaModelClient, context: Deploy
     return normalized
 
 
-def generate_json(model_client: OllamaModelClient, instruction: str, history: list[dict], user_message: str, extra: dict | None = None) -> dict:
+def generate_json(model_client: OpenRouterModelClient, instruction: str, history: list[dict], user_message: str, extra: dict | None = None) -> dict:
     domain_instruction = f"You are ShellMate's deployment preparation assistant.\n{instruction}"
     from src.runtime.prompt_composer import PromptComposer
     system_content = PromptComposer.compose_system_prompt(
@@ -140,7 +140,7 @@ def generate_json(model_client: OllamaModelClient, instruction: str, history: li
         return {}
 
 
-def generate_text(model_client: OllamaModelClient, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
+def generate_text(model_client: OpenRouterModelClient, instruction: str, context: DeploymentContext, fallback: str, extra: dict | None = None) -> str:
     domain_instruction = f"You are ShellMate's deployment preparation assistant.\n{instruction}"
     from src.runtime.prompt_composer import PromptComposer
     system_content = PromptComposer.compose_system_prompt(
@@ -157,24 +157,24 @@ def generate_text(model_client: OllamaModelClient, instruction: str, context: De
     return (response.get("message", {}).get("content", "") or "").strip() or fallback
 
 
-def render_discovery_failure(model_client: OllamaModelClient, context: DeploymentContext, root_path: str, tool_output: str) -> str:
+def render_discovery_failure(model_client: OpenRouterModelClient, context: DeploymentContext, root_path: str, tool_output: str) -> str:
     return generate_text(model_client, "The directory discovery step failed. Explain that you could not inspect the requested server location, mention the root path briefly, and suggest giving the exact project path directly.", context, "I couldn't inspect that server location yet.\n\nIf you want, send me the exact project path directly and I can continue from there.\n\nTechnical details:\n" + tool_output, {"root_path": root_path, "tool_output": tool_output})
 
 
-def render_discovery_result(model_client: OllamaModelClient, context: DeploymentContext, root_path: str, directories: list[str]) -> str:
+def render_discovery_result(model_client: OpenRouterModelClient, context: DeploymentContext, root_path: str, directories: list[str]) -> str:
     fallback = (f"I checked `{root_path}` and found these likely project directories:\n\n" + "\n".join(f"- `{directory}`" for directory in directories[:8]) + "\n\nSend me the directory you want to deploy, and include the public port if you already know it.") if directories else f"I checked `{root_path}`, but I didn't find any immediate subdirectories to deploy from.\n\nIf you already know the project path, send it directly and I’ll continue."
     return generate_text(model_client, "Summarize the result of directory discovery for deployment preparation. If directories were found, present them clearly and ask the user which one to deploy. If none were found, say so and ask for the exact path.", context, fallback, {"root_path": root_path, "directories": directories[:8]})
 
 
-def render_preparation_question(model_client: OllamaModelClient, context: DeploymentContext) -> str:
+def render_preparation_question(model_client: OpenRouterModelClient, context: DeploymentContext) -> str:
     return generate_text(model_client, "Ask the user whether you should inspect the server for likely project directories first, or whether they want to provide the exact project path directly.", context, "I can help with that. Before I prepare the deployment, should I inspect the server and look for likely project directories first?\n\nIf yes, tell me something like `check ~/shellmate-sites` or `inspect the home directory`.\nIf you already know the exact project path, send it directly along with the public port.", {"deployment_state": context.state.to_dict()})
 
 
-def render_project_selection_prompt(model_client: OllamaModelClient, context: DeploymentContext, directories: list[str]) -> str:
+def render_project_selection_prompt(model_client: OpenRouterModelClient, context: DeploymentContext, directories: list[str]) -> str:
     return generate_text(model_client, "Ask the user to choose which directory should be deployed. Use the discovered directories when available and keep the prompt natural.", context, "I still need the project directory before I can prepare the deployment.\n\nSend the full path and, if you know it, the public port you want to expose.", {"directories": directories[:8]})
 
 
-def render_port_prompt(model_client: OllamaModelClient, context: DeploymentContext, app_target: str) -> str:
+def render_port_prompt(model_client: OpenRouterModelClient, context: DeploymentContext, app_target: str) -> str:
     return generate_text(model_client, "Ask the user for the public port to expose for the deployment. Mention that you already have the project path.", context, f"I’ve got the project path for `{app_target}`.\n\nNow send me the public port you want to expose, for example `port 3000`.", {"app_target": app_target})
 
 

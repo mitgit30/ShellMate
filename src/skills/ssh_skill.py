@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 from src.memory.memory_manager import MemoryManager
 from src.runtime.config import get_runtime_settings
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import BaseSkill, SkillContext
 from src.tools.ssh_tool import SSHCommandTool
 
@@ -16,7 +16,7 @@ class SSHSkill(BaseSkill):
         "services, logs, files, and command-driven operations."
     )
 
-    def __init__(self, model_client: OllamaModelClient, ssh_tool: SSHCommandTool, memory_manager: MemoryManager) -> None:
+    def __init__(self, model_client: OpenRouterModelClient, ssh_tool: SSHCommandTool, memory_manager: MemoryManager) -> None:
         super().__init__(memory_manager=memory_manager)
         self._model_client = model_client
         self._ssh_tool = ssh_tool
@@ -75,7 +75,11 @@ class SSHSkill(BaseSkill):
                     arguments=arguments,
                 )
                 last_tool_result = tool_content
-                messages.append({"role": "tool", "content": tool_content})
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id"),
+                    "content": tool_content,
+                })
                 yield {
                     "type": "tool_event",
                     "tool_name": tool_event.tool_name,

@@ -1,20 +1,23 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
 build/
 dist/
 wheels/
-*.egg-info
+.venv/
+venv/
+ENV/
 
-
-# Virtual environments
-.venv
-.env
+# Test and coverage output
 .pytest_cache/
-.streamlit/
-backend/data/keys/
-backend/data/
+.coverage
+htmlcov/
+coverage/
+
+# Local environment files and secrets
 .env
+<<<<<<< Updated upstream
 memory
 logs/*.log
 logs/*.log.*
@@ -24,3 +27,53 @@ evals/evidently_workspace/
 !src/memory/*.py
 .env.example
 docs
+
+# Next.js / Node frontend (frontend-next)
+=======
+.env.*
+!.env.example
+!.env.*.example
+
+# Next.js / Node.js
+>>>>>>> Stashed changes
+node_modules/
+.next/
+out/
+.vercel/
+<<<<<<< Updated upstream
+frontend-next/.env*
+!frontend-next/.env.example
+frontend-next/next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+bun-debug.log*
+=======
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# Runtime data and credentials
+/backend/data/
+/memory/
+*.pem
+*.ppk
+*.key
+
+# Application logs
+*.log
+*.log.*
+
+# Evaluation artifacts
+/evals/reports/
+/evals/evidently_workspace/
+
+# Local Streamlit secrets
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
+>>>>>>> Stashed changes

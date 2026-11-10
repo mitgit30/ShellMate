@@ -3,7 +3,7 @@ fastapi
 uvicorn
 pydantic
 pydantic-settings
-ollama
+openai>=3.48.0
 python-multipart
 tracely
 evidently

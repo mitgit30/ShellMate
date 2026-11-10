@@ -3,7 +3,7 @@ import json
 
 from src.memory.memory_manager import MemoryManager
 from src.deployments.utils import safe_json
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import BaseSkill, SkillContext
 from src.skills.builder_helpers import (chunk_text, clean_summary, has_builder_details, is_capability_request, is_explicit_code_request, is_explicit_generation_request, is_generic_slug, is_vague_builder_request, sanitize_slug)
 from src.tools.builder_tool import BuilderTool
@@ -17,7 +17,7 @@ class BuilderSkill(BaseSkill):
         "through a conversational design workflow."
     )
 
-    def __init__(self, model_client: OllamaModelClient, builder_tool: BuilderTool, memory_manager: MemoryManager) -> None:
+    def __init__(self, model_client: OpenRouterModelClient, builder_tool: BuilderTool, memory_manager: MemoryManager) -> None:
         super().__init__(memory_manager=memory_manager)
         self._model_client = model_client
         self._builder_tool = builder_tool

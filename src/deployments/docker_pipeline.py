@@ -6,7 +6,7 @@ from src.deployments.models import (
     DEPLOYMENT_TYPE_DOCKER_SINGLE,
     DeploymentContext,
 )
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.tools.docker_tools import DockerTool
 from src.deployments.docker_helpers import (
     container_port,
@@ -25,7 +25,7 @@ from src.deployments.utils import chunk_text, derive_app_name, friendly_deployme
 
 class DockerDeploymentPipeline:
     def __init__(
-        self, model_client: OllamaModelClient, docker_tool: DockerTool
+        self, model_client: OpenRouterModelClient, docker_tool: DockerTool
     ) -> None:
         self._model_client = model_client
         self._docker_tool = docker_tool

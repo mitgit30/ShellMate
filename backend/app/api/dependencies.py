@@ -7,7 +7,7 @@ from src.deployments.engine import DeploymentEngine
 from src.memory.context_extractor import ContextExtractor
 from src.memory.memory_manager import MemoryManager
 from src.runtime.agent import ServerOpsAgent
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.builder_skill import BuilderSkill
 from src.skills.registry import SkillRegistry
 from src.skills.deployment_skill import DeploymentSkill
@@ -34,7 +34,7 @@ server_service = ServerService(
 )
 ssh_service = SSHService(server_service=server_service)
 session_store = InMemorySessionStore()
-model_client = OllamaModelClient()
+model_client = OpenRouterModelClient()
 memory_manager = MemoryManager(
     database_path=settings.memory_database_path,
     historical_memory_path=settings.historical_memory_path,

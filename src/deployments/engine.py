@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 from src.deployments.docker_pipeline import DockerDeploymentPipeline
 from src.deployments.models import DeploymentContext, DeploymentState
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import SkillContext
 from src.tools.docker_tools import DockerTool
 from src.tools.ssh_tool import SSHCommandTool
@@ -16,7 +16,7 @@ from src.deployments.utils import chunk_text, directory_discovery_command, parse
 class DeploymentEngine:
     def __init__(
         self,
-        model_client: OllamaModelClient,
+        model_client: OpenRouterModelClient,
         docker_tool: DockerTool,
         ssh_tool: SSHCommandTool,
     ) -> None:

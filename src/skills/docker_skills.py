@@ -2,7 +2,7 @@ import json
 from collections.abc import Iterator
 
 from src.runtime.config import get_runtime_settings
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import BaseSkill, SkillContext
 from src.tools.docker_tools import DockerTool
 
@@ -12,7 +12,7 @@ class DockerSkill(BaseSkill):
     name = "Docker Skill"
     description = "Manage Docker containers, images, and deployments on a server."
 
-    def __init__(self, model_client: OllamaModelClient, docker_tool: DockerTool):
+    def __init__(self, model_client: OpenRouterModelClient, docker_tool: DockerTool):
         self._model_client = model_client
         self._docker_tool = docker_tool
         self._settings = get_runtime_settings()
@@ -75,7 +75,11 @@ class DockerSkill(BaseSkill):
                 )
 
                 last_tool_result = tool_content
-                messages.append({"role": "tool", "content": tool_content})
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id"),
+                    "content": tool_content,
+                })
 
                 yield {
                     "type": "tool_event",

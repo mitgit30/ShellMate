@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from src.memory.memory_manager import MemoryManager
 from src.deployments.engine import DeploymentEngine
 from src.deployments.models import DeploymentState
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.base import BaseSkill, SkillContext
 
 
@@ -18,7 +18,7 @@ class DeploymentSkill(BaseSkill):
     def __init__(
         self,
         deployment_engine: DeploymentEngine,
-        model_client: OllamaModelClient,
+        model_client: OpenRouterModelClient,
         memory_manager: MemoryManager,
     ) -> None:
         super().__init__(memory_manager=memory_manager)

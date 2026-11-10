@@ -78,8 +78,13 @@ class PromptComposer:
             )
         else:
             parts.append(
-                "Respond naturally, clearly, and briefly. Do not mention internal routing, "
-                "skills, tool executions, or internal pipeline mechanics unless asked."
+                "Respond naturally, clearly, and briefly. Use plain text for prose. Do not use Markdown tables, "
+                "pipe-delimited rows, heading markers, emphasis markers, or fenced code blocks. "
+                "When presenting multiple distinct items, use a real Markdown list: prefix unordered items with '- ' "
+                "or use '1. ', '2. ', etc. for sequential steps. Never substitute indented bare lines for list markers. "
+                "For multiple facts, use short readable sentences or one plain 'Label: value' line per fact. "
+                "Do not dump raw command output. Do not mention internal routing, skills, tool executions, "
+                "or internal pipeline mechanics unless asked."
             )
 
         if server_id and memory_manager:

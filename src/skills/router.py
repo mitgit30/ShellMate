@@ -1,13 +1,13 @@
 import json
 
 from src.runtime.models import SkillRouteDecision
-from src.runtime.ollama_client import OllamaModelClient
+from src.runtime.openrouter_client import OpenRouterModelClient
 from src.skills.builder_helpers import is_explicit_generation_request, is_vague_builder_request
 from src.skills.registry import SkillRegistry
 
 
 class SkillRouter:
-    def __init__(self, model_client: OllamaModelClient, skill_registry: SkillRegistry) -> None:
+    def __init__(self, model_client: OpenRouterModelClient, skill_registry: SkillRegistry) -> None:
         self._model_client = model_client
         self._skill_registry = skill_registry
 
